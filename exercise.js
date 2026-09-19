@@ -3,6 +3,7 @@
 
   const normalizeAnswer = (value) =>
     String(value).normalize('NFKC').trim().toLocaleLowerCase('en').replace(/[’‘ʼ]/g, "'");
+  const compareStrings = (a, b) => (a > b) - (a < b);
   const hasStarted = (task) =>
     Boolean(task) &&
     (Boolean(task.value) ||
@@ -42,7 +43,7 @@
     return weighted.find(([, weight]) => (cursor -= weight) < 0)?.[0] ?? weighted.at(-1)?.[0];
   };
 
-  function createWithProfile(cue, random = Math.random, difficulty = 'random', profile) {
+  function createWithProfile(cue, random = Math.random, difficulty = 'balanced', profile) {
     // Keep contractions and hyphenated words intact; exclude bracketed cues and common sound labels.
     const excluded = [
       ...cue.text.matchAll(
@@ -110,7 +111,7 @@
       entries.push([word, { ...raw }]);
     }
     if (strict && entries.length > 2000) return null;
-    entries.sort((a, b) => b[1].lastSeenAt - a[1].lastSeenAt || a[0].localeCompare(b[0]));
+    entries.sort((a, b) => b[1].lastSeenAt - a[1].lastSeenAt || compareStrings(a[0], b[0]));
     return { schema: 1, words: Object.fromEntries(entries.slice(0, 2000)) };
   }
 
@@ -118,8 +119,13 @@
     return restoreWordProfile(value);
   }
 
-  function create(cue, random = Math.random, difficulty = 'random', wordProfile = null) {
-    return createWithProfile(cue, random, difficulty, usableProfile(wordProfile));
+  function create(cue, random = Math.random, difficulty = 'balanced', wordProfile = null) {
+    return createWithProfile(
+      cue,
+      random,
+      preferences({ difficulty }).difficulty,
+      usableProfile(wordProfile),
+    );
   }
 
   function createTasks(cues, options = {}) {
@@ -182,7 +188,7 @@
 
   function buildWordProfile(lessons) {
     return [...lessons]
-      .sort((a, b) => a.updatedAt - b.updatedAt || a.videoId.localeCompare(b.videoId))
+      .sort((a, b) => a.updatedAt - b.updatedAt || compareStrings(a.videoId, b.videoId))
       .reduce((profile, lesson) => updateWordProfile(profile, [], lesson.tasks, lesson.updatedAt), {
         schema: 1,
         words: {},

@@ -386,3 +386,32 @@ test('word profile builds lessons in update order', () => {
   assert.equal(profile.words.first.lastSeenAt, 10);
   assert.equal(profile.words.second.lastSeenAt, 20);
 });
+
+test('create defaults unknown difficulty to the balanced word pool', () => {
+  const source = cue('the ally');
+  for (const difficulty of [undefined, 'typo'])
+    assert.equal(exercise.create(source, () => 0, difficulty).answer, 'ally');
+});
+
+test('profile ties use code-point order for non-ASCII words', () => {
+  const entry = { attempts: 0, clean: 0, mistakes: 0, hints: 0, misses: 0, lastSeenAt: 10 };
+  const profile = exercise.restoreWordProfile({
+    schema: 1,
+    words: { éclair: entry, zebra: entry },
+  });
+  assert.deepEqual(Object.keys(profile.words), ['zebra', 'éclair']);
+});
+
+test('word profile builds tied lessons in code-point video ID order', () => {
+  const order = [];
+  const lesson = (videoId) => ({
+    videoId,
+    updatedAt: 10,
+    get tasks() {
+      order.push(videoId);
+      return [];
+    },
+  });
+  exercise.buildWordProfile([lesson('éclair'), lesson('zebra')]);
+  assert.deepEqual(order, ['zebra', 'éclair']);
+});
