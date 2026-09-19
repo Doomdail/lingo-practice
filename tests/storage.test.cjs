@@ -456,7 +456,7 @@ test('future duplicate and one-broken-session backups fail strict preview valida
 });
 
 test('list export and vocabulary omit invalid local timestamps and count damaged records', async () => {
-  for (const updatedAt of [-1, Infinity]) {
+  for (const updatedAt of [-1, Infinity, NaN, null, '20', undefined]) {
     const damaged = libraryLesson('damaged01', updatedAt);
     damaged.tasks[0] = { ...damaged.tasks[0], text: 'Broken', answer: 'Broken', value: 'Broken' };
     const app = worker({
@@ -486,6 +486,27 @@ test('list export and vocabulary omit invalid local timestamps and count damaged
     assert.equal(vocabulary.invalidCount, 1);
     assert.deepEqual(app.snapshot(), before);
   }
+});
+
+test('library accepts a legacy lesson with an omitted timestamp as time zero', async () => {
+  const lesson = libraryLesson('video01', 20);
+  delete lesson.updatedAt;
+  const app = worker({ 'lesson:video01': lesson });
+  const before = app.snapshot();
+  const listed = await app.sendLibrary({ action: 'list' });
+  assert.equal(listed.lessons.length, 1);
+  assert.equal(listed.lessons[0].updatedAt, 0);
+  assert.equal(listed.invalidCount, 0);
+  const exported = await app.sendLibrary({ action: 'export' });
+  assert.equal(exported.backup.lessons.length, 1);
+  assert.equal(exported.backup.lessons[0].updatedAt, 0);
+  assert.equal(exported.invalidCount, 0);
+  assert.equal(backupData.parseBackup(exported.backup).ok, true);
+  const vocabulary = await app.sendLibrary({ action: 'vocabulary' });
+  assert.equal(vocabulary.words[0].word, 'hello');
+  assert.equal(vocabulary.words[0].lastSeenAt, 0);
+  assert.equal(vocabulary.invalidCount, 0);
+  assert.deepEqual(app.snapshot(), before);
 });
 
 test('preview can derive legacy profile without writing it', async () => {

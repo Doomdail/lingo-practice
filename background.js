@@ -201,9 +201,12 @@ function collectLessons(snapshot) {
   for (const [key, record] of Object.entries(snapshot)) {
     if (!key.startsWith('lesson:') || isTombstone(record)) continue;
     const videoId = key.slice(7);
-    const session = validVideoId(videoId) && LingoExercise.restoreSession(record, videoId);
-    if (session && Number.isFinite(session.updatedAt) && session.updatedAt >= 0)
-      sessions.push(session);
+    const validTimestamp =
+      !Object.hasOwn(record ?? {}, 'updatedAt') ||
+      (Number.isFinite(record.updatedAt) && record.updatedAt >= 0);
+    const session =
+      validVideoId(videoId) && validTimestamp && LingoExercise.restoreSession(record, videoId);
+    if (session) sessions.push(session);
     else invalidCount++;
   }
   return { sessions, invalidCount };
