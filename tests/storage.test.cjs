@@ -455,9 +455,40 @@ test('future duplicate and one-broken-session backups fail strict preview valida
   }
 });
 
-test('export applies strict backup limits and preview can derive legacy profile without writing it', async () => {
-  const app = worker({ 'lesson:video01': libraryLesson('video01', -1) });
-  assert.equal((await app.sendLibrary({ action: 'export' }))?.code, 'INVALID_BACKUP');
+test('list export and vocabulary omit invalid local timestamps and count damaged records', async () => {
+  for (const updatedAt of [-1, Infinity]) {
+    const damaged = libraryLesson('damaged01', updatedAt);
+    damaged.tasks[0] = { ...damaged.tasks[0], text: 'Broken', answer: 'Broken', value: 'Broken' };
+    const app = worker({
+      'lesson:video01': libraryLesson('video01', 20),
+      'lesson:damaged01': damaged,
+    });
+    const before = app.snapshot();
+    const listed = await app.sendLibrary({ action: 'list' });
+    assert.deepEqual(
+      listed.lessons.map((lesson) => lesson.videoId),
+      ['video01'],
+    );
+    assert.equal(listed.invalidCount, 1);
+    const exported = await app.sendLibrary({ action: 'export' });
+    assert.equal(exported.error, undefined);
+    assert.deepEqual(
+      exported.backup.lessons.map((lesson) => lesson.videoId),
+      ['video01'],
+    );
+    assert.equal(exported.invalidCount, 1);
+    assert.equal(backupData.parseBackup(exported.backup).ok, true);
+    const vocabulary = await app.sendLibrary({ action: 'vocabulary' });
+    assert.deepEqual(
+      vocabulary.words.map((entry) => entry.word),
+      ['hello'],
+    );
+    assert.equal(vocabulary.invalidCount, 1);
+    assert.deepEqual(app.snapshot(), before);
+  }
+});
+
+test('preview can derive legacy profile without writing it', async () => {
   const legacy = worker({ 'lesson:video01': libraryLesson('video01', 10) });
   const before = legacy.snapshot();
   assert.equal(
@@ -466,6 +497,26 @@ test('export applies strict backup limits and preview can derive legacy profile 
     1,
   );
   assert.deepEqual(legacy.snapshot(), before);
+});
+
+test('preview and import reject unusable backup video IDs without writes', async () => {
+  for (const videoId of ['bad/id', 'a'.repeat(65)]) {
+    const backup = importBackup();
+    backup.lessons.at(-1).videoId = videoId;
+    const app = worker(importSeed());
+    const before = app.snapshot();
+    for (const action of ['previewImport', 'import']) {
+      const result = await app.sendLibrary({
+        action,
+        backup,
+        importPreferences: true,
+        expectedEpoch: 0,
+        expectedSummary: { added: 1, updated: 1, skipped: 1, wordsUpdated: 1 },
+      });
+      assert.equal(result.code, 'INVALID_BACKUP');
+      assert.deepEqual(app.snapshot(), before);
+    }
+  }
 });
 
 test('import re-reads state and rejects a changed preview before assigning new revisions', async () => {

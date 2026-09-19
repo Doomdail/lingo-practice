@@ -202,7 +202,8 @@ function collectLessons(snapshot) {
     if (!key.startsWith('lesson:') || isTombstone(record)) continue;
     const videoId = key.slice(7);
     const session = validVideoId(videoId) && LingoExercise.restoreSession(record, videoId);
-    if (session) sessions.push(session);
+    if (session && Number.isFinite(session.updatedAt) && session.updatedAt >= 0)
+      sessions.push(session);
     else invalidCount++;
   }
   return { sessions, invalidCount };
@@ -331,6 +332,8 @@ async function handleLibraryMessage(message) {
       return epochConflict(storageEpoch);
     const parsed = LingoData.parseBackup(message.backup);
     if (!parsed.ok) return { error: parsed.message, code: 'INVALID_BACKUP' };
+    if (!parsed.backup.lessons.every((lesson) => validVideoId(lesson.videoId)))
+      return { error: 'Резервная копия содержит неверный ID видео.', code: 'INVALID_BACKUP' };
     const plan = LingoData.planBackupImport(
       state,
       parsed.backup,
