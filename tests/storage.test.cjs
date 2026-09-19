@@ -419,6 +419,100 @@ test('corrupt profile is rebuilt and the first save combines migration with less
   assert.equal(stored.preferences.fontSize, 22);
 });
 
+test('null stored preferences return defaults while legacy profile migration runs once', async () => {
+  let scans = 0;
+  const writes = [];
+  const app = worker(
+    { preferences: null, 'lesson:old01': completedLesson('old01', 'friend', 10) },
+    {
+      beforeGet: (keys) => {
+        if (keys === null) scans++;
+      },
+      beforeSet: (changes) => writes.push(structuredClone(changes)),
+    },
+  );
+  for (let read = 0; read < 2; read++) {
+    const loaded = await app.sendLesson({ action: 'get' });
+    assert.equal(loaded.error, undefined);
+    assert.deepEqual(loaded.preferences, {
+      difficulty: 'balanced',
+      gapFrequency: 'dense',
+      language: 'auto',
+      videoSize: 'medium',
+      fontSize: 18,
+      visibleRows: 5,
+      autoPause: false,
+      onboardingSeen: false,
+    });
+    assert.equal(loaded.wordProfile.words.friend.attempts, 1);
+  }
+  assert.equal(scans, 1);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(Object.keys(writes[0]), ['wordProfile']);
+  assert.equal(app.snapshot().preferences, null);
+});
+
+for (const words of [42, true]) {
+  test(`primitive profile words ${words} rebuilds completed history once`, async () => {
+    let scans = 0,
+      writes = 0;
+    const app = worker(
+      {
+        wordProfile: { schema: 1, words },
+        'lesson:old01': completedLesson('old01', 'friend', 10),
+      },
+      {
+        beforeGet: (keys) => {
+          if (keys === null) scans++;
+        },
+        beforeSet: () => {
+          writes++;
+        },
+      },
+    );
+    for (let read = 0; read < 2; read++) {
+      const loaded = await app.sendLesson({ action: 'get' });
+      assert.deepEqual(loaded.wordProfile, {
+        schema: 1,
+        words: {
+          friend: { attempts: 1, clean: 1, mistakes: 0, hints: 0, misses: 0, lastSeenAt: 10 },
+        },
+      });
+    }
+    assert.equal(scans, 1);
+    assert.equal(writes, 1);
+    assert.equal((await app.sendLesson(save('Hello'))).saved, true);
+    assert.equal(app.snapshot().wordProfile.words.friend.attempts, 1);
+    assert.equal(app.snapshot().wordProfile.words.hello.attempts, 1);
+  });
+}
+
+test('valid empty profile does not remigrate existing lesson history', async () => {
+  let scans = 0,
+    writes = 0;
+  const app = worker(
+    {
+      wordProfile: { schema: 1, words: {} },
+      'lesson:old01': completedLesson('old01', 'friend', 10),
+    },
+    {
+      beforeGet: (keys) => {
+        if (keys === null) scans++;
+      },
+      beforeSet: () => {
+        writes++;
+      },
+    },
+  );
+  for (let read = 0; read < 2; read++)
+    assert.deepEqual((await app.sendLesson({ action: 'get' })).wordProfile, {
+      schema: 1,
+      words: {},
+    });
+  assert.equal(scans, 0);
+  assert.equal(writes, 0);
+});
+
 test('conflicts invalid payloads and set failure never mutate profile or other stored state', async () => {
   let fail = false;
   const app = worker(

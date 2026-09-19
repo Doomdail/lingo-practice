@@ -62,7 +62,11 @@ const readRevision = (record) =>
 const isTombstone = (record) => record?.deleted === true;
 
 async function ensureWordProfile(snapshot) {
-  const restored = LingoExercise.restoreWordProfile(snapshot.wordProfile, true);
+  const words = snapshot.wordProfile?.words;
+  const restored =
+    words && typeof words === 'object' && !Array.isArray(words)
+      ? LingoExercise.restoreWordProfile(snapshot.wordProfile, true)
+      : null;
   if (restored) return { profile: restored, migrated: false };
   const all = await chrome.storage.local.get(null);
   const lessons = Object.entries(all)
@@ -88,11 +92,12 @@ async function handleLessonMessage(message) {
     ? null
     : LingoExercise.restoreSession(record, message.videoId);
   if (message.action === 'get') {
+    const preferences = LingoExercise.preferences(snapshot.preferences ?? {});
     const { profile, migrated } = await ensureWordProfile(snapshot);
     if (migrated) await chrome.storage.local.set({ wordProfile: profile });
     return {
       session: previousSession,
-      preferences: LingoExercise.preferences(snapshot.preferences),
+      preferences,
       wordProfile: profile,
       version,
       storageEpoch,
