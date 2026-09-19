@@ -6,8 +6,6 @@ English · [Русский](README.ru.md) · [Download](https://github.com/Doomd
 
 Practice listening with YouTube videos. Fill in missing words, replay a line, and revisit difficult parts while keeping your progress on your device.
 
-![Lingo Practice: listen to a video and fill in a missing word](store-assets/promo440x280.png)
-
 ## Features
 
 - Exercises from YouTube captions, its transcript panel, or a local SRT/VTT file.
@@ -22,13 +20,13 @@ No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download a ZIP from [Releases](https://github.com/Doomdail/lingo-practice/releases), or choose **Code → Download ZIP** on this repository.
-2. Extract it into a permanent folder. Find the folder containing `manifest.json`; a source ZIP may contain an extra outer folder.
+1. Download `lingo-practice-0.4.0.zip` from [Releases](https://github.com/Doomdail/lingo-practice/releases).
+2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The 0.3.1 package should appear as **0.3.1** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The 0.4.0 package should appear as **0.4.0** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
 
 ## Use
 
@@ -90,41 +88,6 @@ Removing the extension deletes its saved local data. Exiting practice or disabli
 Main scenarios and a live YouTube page have been tested in **Chromium on Windows**. Keyboard input and language switching were also tested in **Opera GX 135.0.5973.94**. Edge has not been tested separately. Layouts cover desktop and compact windows, including 1440×1050 and 780×800.
 
 Shorts, live streams, mobile YouTube, other video sites, and full-screen practice are unsupported. Exercise tracking is suspended during ads, but not every advertising variant has been tested. Caption availability and accuracy depend on YouTube and the video. Difficulty is optimized for English; there is no dedicated Chinese or Japanese word segmentation.
-
-## Development
-
-Unit checks have been tested with **Node.js 22**. Run them from the repository folder:
-
-```powershell
-node --test tests/exercise.test.cjs tests/storage.test.cjs tests/i18n.test.cjs
-```
-
-Browser checks additionally require the optional development tool **Playwright** and Chromium. Make the `playwright` module available locally or through `NODE_PATH`. Use `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to select a Chromium executable when needed.
-
-```powershell
-node tests/browser-smoke.cjs
-node tests/browser-smoke.cjs --upgrade
-node tests/browser-smoke.cjs --storage
-node tests/browser-smoke.cjs --i18n
-node tests/keyboard-smoke.cjs
-node tests/browser-smoke.cjs '--live=https://www.youtube.com/watch?v=jNQXAC9IVRw'
-```
-
-The default scenario covers the basic lesson and page restoration. `--upgrade` covers import, settings, hints, persistence, and review; `--storage` checks conflicting tabs; `--i18n` checks language selection. The keyboard test sends NumPad events, including NumLock-off editing. `--live` uses the real YouTube page and requires network access and available captions.
-
-Browser checks use a temporary extension copy with YouTube access to simulate clicking its icon. They leave the working manifest unchanged and save screenshots in `output/playwright`. Node.js and Playwright are not required to use the extension.
-
-### Package
-
-On Windows, use **PowerShell 5 or later**:
-
-```powershell
-powershell -NoProfile -File scripts/package.ps1
-```
-
-The script reads the version from `manifest.json` and writes two ZIPs next to the repository folder: `lingo-practice-<version>.zip` with source and documentation, and `lingo-practice-<version>-store.zip` with the installable files and `manifest.json` at the archive root. It verifies each archived file with SHA-256.
-
-To test an extracted package, set `LINGO_EXTENSION_ROOT` to its folder and run a browser scenario from the source repository. To render the SVG icons and promotional image, use `node scripts/render-assets.cjs` with the same Playwright setup.
 
 ## Support and license
 
