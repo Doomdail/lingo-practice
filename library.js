@@ -1,6 +1,11 @@
 (function () {
   'use strict';
 
+  if (location.hash) {
+    location.replace(location.pathname + location.search);
+    return;
+  }
+
   const state = {
     lessons: [],
     words: [],
@@ -80,6 +85,11 @@
     }).format(new Date(value));
   }
 
+  function translateSource(label) {
+    const automatic = ' · автоматические';
+    return label.endsWith(automatic) ? label.slice(0, -automatic.length) + t(automatic) : t(label);
+  }
+
   function appendUserTemplate(element, key, parameter, value) {
     const marker = '\u0000';
     const [before, after = ''] = t(key, { [parameter]: marker }).split(marker);
@@ -105,7 +115,12 @@
       card.dataset.lessonId = lesson.videoId;
       const title = create('h3', 'user-content', lesson.title || lesson.videoId);
       const source = create('p', 'meta');
-      appendUserTemplate(source, 'Источник: {source}', 'source', lesson.sourceLabel);
+      appendUserTemplate(
+        source,
+        'Источник: {source}',
+        'source',
+        translateSource(lesson.sourceLabel),
+      );
       const date = create(
         'p',
         'meta',
@@ -399,22 +414,30 @@
     );
   }
 
-  async function previewCurrentImport() {
-    if (!currentImport) return;
+  function isCurrentImport(operation) {
+    return currentImport === operation && importDialog.open;
+  }
+
+  async function previewCurrentImport(operation = currentImport) {
+    if (!operation || !isCurrentImport(operation)) return;
+    const ticket = {};
+    operation.previewTicket = ticket;
+    operation.preview = null;
     const applyButton = byId('apply-import');
     applyButton.disabled = true;
     byId('import-error').hidden = true;
     byId('import-summary').textContent = t('Загрузка библиотеки…');
     try {
       const result = await requestLibrary('previewImport', {
-        backup: currentImport.backup,
+        backup: operation.backup,
         importPreferences: byId('import-preferences').checked,
       });
-      currentImport.preview = {
+      if (!isCurrentImport(operation) || operation.previewTicket !== ticket) return;
+      operation.preview = {
         storageEpoch: result.storageEpoch,
         summary: Object.freeze({ ...result.summary }),
       };
-      renderImportSummary(currentImport.preview.summary);
+      renderImportSummary(operation.preview.summary);
       const warning = byId('import-warning');
       warning.hidden = result.invalidLocalCount === 0;
       warning.textContent = result.invalidLocalCount
@@ -424,6 +447,7 @@
         : '';
       applyButton.disabled = false;
     } catch (error) {
+      if (!isCurrentImport(operation) || operation.previewTicket !== ticket) return;
       const importError = byId('import-error');
       importError.hidden = false;
       importError.textContent = translatedError(error);
@@ -432,18 +456,29 @@
   }
 
   async function openImport(file, trigger) {
-    currentImport = { backup: null, preview: null };
+    const operation = { backup: null, preview: null, previewTicket: null };
+    currentImport = operation;
     byId('import-file-name').textContent = file?.name ?? '';
     byId('import-preferences').checked = false;
     byId('import-warning').hidden = true;
     byId('import-error').hidden = true;
     byId('import-summary').textContent = t('Загрузка библиотеки…');
     byId('apply-import').disabled = true;
+    importDialog.addEventListener(
+      'close',
+      () => {
+        if (currentImport === operation) currentImport = null;
+      },
+      { once: true },
+    );
     openDialog(importDialog, trigger, importDialog.querySelector('button[value="cancel"]'));
     try {
-      currentImport.backup = await readBackupFile(file);
-      await previewCurrentImport();
+      const backup = await readBackupFile(file);
+      if (!isCurrentImport(operation)) return;
+      operation.backup = backup;
+      await previewCurrentImport(operation);
     } catch (error) {
+      if (!isCurrentImport(operation)) return;
       const importError = byId('import-error');
       importError.hidden = false;
       importError.textContent = translatedError(error);
@@ -452,37 +487,41 @@
   }
 
   async function applyImport() {
-    if (!currentImport?.preview) return;
+    const operation = currentImport;
+    if (!operation?.preview || !isCurrentImport(operation)) return;
     const applyButton = byId('apply-import');
     applyButton.disabled = true;
-    const preview = currentImport.preview;
+    const preview = operation.preview;
     try {
       await requestLibrary('import', {
-        backup: currentImport.backup,
+        backup: operation.backup,
         importPreferences: byId('import-preferences').checked,
         expectedEpoch: preview.storageEpoch,
         expectedSummary: preview.summary,
       });
+      if (!isCurrentImport(operation)) return;
       importDialog.close();
       currentImport = null;
       announce('Импорт завершён.');
       await refreshLibrary();
     } catch (error) {
+      if (!isCurrentImport(operation)) return;
       if (retryImportCodes.has(error.code)) {
         announce(error.message);
         await refreshLibrary();
-        await previewCurrentImport();
+        if (isCurrentImport(operation)) await previewCurrentImport(operation);
       } else {
         const importError = byId('import-error');
         importError.hidden = false;
         importError.textContent = translatedError(error);
       }
     } finally {
-      if (currentImport?.preview) applyButton.disabled = false;
+      if (isCurrentImport(operation) && operation.preview) applyButton.disabled = false;
     }
   }
 
   function initialize() {
+    applyLanguage('auto');
     for (const link of document.querySelectorAll('.section-nav a'))
       link.addEventListener('click', (event) => {
         event.preventDefault();

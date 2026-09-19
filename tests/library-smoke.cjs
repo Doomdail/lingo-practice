@@ -58,10 +58,13 @@ const lesson = (videoId, updatedAt, revision, patch = {}) => ({
   ...patch,
 });
 const librarySeed = {
-  'lesson:older01': lesson('older01', 10, 1, { position: 3 }),
+  'lesson:older01': lesson('older01', 10, 1, {
+    position: 3,
+    sourceLabel: 'English · автоматические',
+  }),
   'lesson:newer01': lesson('newer01', 20, 4, {
     title: 'Мой новый урок',
-    sourceLabel: 'Русская дорожка',
+    sourceLabel: 'Расшифровка YouTube · текущий язык',
     tasks: [
       task(0, 'hello', 'correct', {
         text: 'Привет, hello!',
@@ -104,6 +107,42 @@ function copyExtension(target) {
   }
 }
 
+async function assertDialogReflow(page, dialog, actionName) {
+  await dialog.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  const action = dialog.getByRole('button', { name: actionName, exact: true });
+  await action.scrollIntoViewIfNeeded();
+  const metrics = await dialog.evaluate((element) => {
+    const rectangle = element.getBoundingClientRect();
+    return {
+      dialogHorizontalOverflow: element.scrollWidth > element.clientWidth,
+      documentHorizontalOverflow:
+        document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      reachedBottom: element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
+      left: rectangle.left,
+      right: rectangle.right,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  assert.equal(metrics.dialogHorizontalOverflow, false);
+  assert.equal(metrics.documentHorizontalOverflow, false);
+  assert.equal(metrics.reachedBottom, true);
+  assert.ok(
+    metrics.left >= 0 && metrics.right <= metrics.viewportWidth,
+    `dialog must stay inside the viewport: ${JSON.stringify(metrics)}`,
+  );
+  const actionBox = await action.boundingBox();
+  const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  assert.ok(
+    actionBox &&
+      actionBox.x >= 0 &&
+      actionBox.x + actionBox.width <= viewport.width &&
+      actionBox.y >= 0 &&
+      actionBox.y + actionBox.height <= viewport.height,
+  );
+}
+
 (async () => {
   const installed = fs.mkdtempSync(path.join(os.tmpdir(), 'lingo-library-extension-'));
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'lingo-library-profile-'));
@@ -120,6 +159,51 @@ function copyExtension(target) {
   try {
     const worker = context.serviceWorkers()[0] || (await context.waitForEvent('serviceworker'));
     const extensionId = new URL(worker.url()).host;
+    await worker.evaluate(() => {
+      self.__libraryOriginalStorageGet = chrome.storage.local.get.bind(chrome.storage.local);
+      chrome.storage.local.get = async () => {
+        throw new Error('forced storage failure');
+      };
+    });
+    for (const expected of [
+      {
+        locale: 'ru-RU',
+        language: 'ru',
+        title: 'Мои занятия · Lingo Practice',
+        heading: 'Мои занятия',
+        refresh: 'Обновить библиотеку',
+        error: 'Не удалось загрузить библиотеку. Не удалось сохранить или прочитать прогресс.',
+      },
+      {
+        locale: 'en-US',
+        language: 'en',
+        title: 'My lessons · Lingo Practice',
+        heading: 'My lessons',
+        refresh: 'Refresh library',
+        error: 'Could not load the library. Could not save or read progress.',
+      },
+    ]) {
+      const failurePage = await context.newPage();
+      await failurePage.addInitScript((locale) => {
+        Object.defineProperty(Navigator.prototype, 'language', {
+          configurable: true,
+          get: () => locale,
+        });
+      }, expected.locale);
+      await failurePage.goto(`chrome-extension://${extensionId}/library.html`);
+      const loadError = failurePage.locator('#load-error:not([hidden])');
+      await loadError.waitFor();
+      assert.equal(await failurePage.locator('html').getAttribute('lang'), expected.language);
+      assert.equal(await failurePage.title(), expected.title);
+      await failurePage.getByRole('heading', { name: expected.heading, exact: true }).waitFor();
+      await failurePage.getByRole('button', { name: expected.refresh, exact: true }).waitFor();
+      assert.match(await loadError.innerText(), new RegExp(expected.error.replaceAll('.', '\\.')));
+      await failurePage.close();
+    }
+    await worker.evaluate(() => {
+      chrome.storage.local.get = self.__libraryOriginalStorageGet;
+      delete self.__libraryOriginalStorageGet;
+    });
     await worker.evaluate((seed) => chrome.storage.local.set(seed), librarySeed);
     const page = await context.newPage();
     const errors = [];
@@ -144,6 +228,15 @@ function copyExtension(target) {
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'data-help');
     await page.getByRole('button', { name: 'Обновить библиотеку', exact: true }).click();
     await page.locator('[data-lesson-id="newer01"]').waitFor();
+
+    const fragmentPagePromise = context.waitForEvent('page');
+    await page
+      .getByRole('link', { name: 'Трудные слова', exact: true })
+      .click({ button: 'middle' });
+    const fragmentPage = await fragmentPagePromise;
+    await fragmentPage.locator('[data-lesson-id="newer01"]').waitFor({ timeout: 5000 });
+    assert.equal(fragmentPage.url(), exactLibraryUrl);
+    await fragmentPage.close();
 
     await context.route('https://www.youtube.com/**', (route) =>
       route.fulfill({
@@ -308,6 +401,49 @@ function copyExtension(target) {
     );
     assert.equal(await page.title(), 'My lessons · Lingo Practice');
     assert.equal(await page.locator('html').getAttribute('lang'), 'en');
+    assert.match(
+      await page.locator('[data-lesson-id="newer01"]').innerText(),
+      /Source: YouTube transcript · current language/,
+    );
+    assert.match(
+      await page.locator('[data-lesson-id="older01"]').innerText(),
+      /Source: English · auto-generated/,
+    );
+
+    const englishHelpTrigger = page.getByRole('button', { name: 'How to practice', exact: true });
+    await englishHelpTrigger.click();
+    const englishHelpDialog = page.getByRole('dialog');
+    await englishHelpDialog
+      .getByRole('heading', { name: 'How to practice', exact: true })
+      .waitFor();
+    assert.match(
+      await englishHelpDialog.innerText(),
+      /Choose a subtitle track or import SRT\/VTT.*Listen, fill in the word and press Enter.*Use replay and hints/s,
+    );
+    await page.keyboard.press('Escape');
+    assert.equal(
+      await englishHelpTrigger.evaluate((element) => element === document.activeElement),
+      true,
+    );
+
+    const englishExportTrigger = page.getByRole('button', {
+      name: 'Export backup',
+      exact: true,
+    });
+    await englishExportTrigger.click();
+    const englishExportDialog = page.getByRole('dialog');
+    await englishExportDialog
+      .getByRole('heading', { name: 'Backup export', exact: true })
+      .waitFor();
+    assert.match(
+      await englishExportDialog.innerText(),
+      /plaintext captions.*correct answers.*entered answers/s,
+    );
+    await englishExportDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.equal(
+      await englishExportTrigger.evaluate((element) => element === document.activeElement),
+      true,
+    );
 
     await worker.evaluate(async () => {
       const key = 'lesson:newer01';
@@ -334,6 +470,7 @@ function copyExtension(target) {
     await refreshedDelete.click();
     await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
     await page.waitForFunction(() => !document.querySelector('[data-lesson-id="newer01"]'));
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'lessons');
 
     const englishClear = page.getByRole('button', { name: 'Delete all data', exact: true });
     await englishClear.click();
@@ -344,7 +481,91 @@ function copyExtension(target) {
     await page.getByText('No saved lessons yet.', { exact: true }).waitFor();
     await page.getByText('No difficult words yet.', { exact: true }).waitFor();
 
+    const raceBackupA = structuredClone(backup);
+    raceBackupA.lessons = [backup.lessons.find(({ videoId }) => videoId === 'newer01')];
+    const raceBackupB = structuredClone(backup);
+    raceBackupB.lessons = [backup.lessons.find(({ videoId }) => videoId === 'older01')];
+    assert.ok(raceBackupA.lessons[0] && raceBackupB.lessons[0]);
+    await worker.evaluate(() => {
+      self.__libraryImportMessages = [];
+      self.__libraryImportObserver = (message) => {
+        if (
+          message?.type === 'LINGO_LIBRARY' &&
+          ['previewImport', 'import'].includes(message.action)
+        )
+          self.__libraryImportMessages.push({
+            action: message.action,
+            lessons: message.backup?.lessons?.map(({ videoId }) => videoId) ?? [],
+          });
+      };
+      chrome.runtime.onMessage.addListener(self.__libraryImportObserver);
+    });
+    await page.evaluate(() => {
+      const originalText = File.prototype.text;
+      let release;
+      window.__restoreFileText = () => {
+        File.prototype.text = originalText;
+      };
+      File.prototype.text = function () {
+        if (this.name !== 'slow-a.json') return originalText.call(this);
+        return new Promise((resolve, reject) => {
+          release = () => originalText.call(this).then(resolve, reject);
+        });
+      };
+      window.__releaseSlowFile = () => release();
+    });
     const englishImport = page.getByLabel('Backup file');
+    await englishImport.setInputFiles({
+      name: 'slow-a.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(raceBackupA)),
+    });
+    const importRaceDialog = page.getByRole('dialog');
+    await importRaceDialog.getByText('slow-a.json', { exact: true }).waitFor();
+    await importRaceDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await englishImport.setInputFiles({
+      name: 'chosen-b.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(raceBackupB)),
+    });
+    await importRaceDialog.getByText('chosen-b.json', { exact: true }).waitFor();
+    await page.waitForFunction(() => !document.querySelector('#apply-import').disabled);
+    await page.evaluate(() => window.__releaseSlowFile());
+    await page.waitForTimeout(750);
+    assert.match(await importRaceDialog.innerText(), /chosen-b\.json/);
+    assert.deepEqual(
+      await worker.evaluate(() => self.__libraryImportMessages),
+      [{ action: 'previewImport', lessons: ['older01'] }],
+      'closing the delayed file must prevent its preview request',
+    );
+    await importRaceDialog.getByRole('button', { name: 'Import', exact: true }).click();
+    await page.locator('[data-lesson-id="older01"]').waitFor();
+    assert.equal(await page.locator('[data-lesson-id="newer01"]').count(), 0);
+    assert.deepEqual(
+      await page
+        .locator('[data-lesson-id]')
+        .evaluateAll((nodes) => nodes.map((node) => node.dataset.lessonId)),
+      ['older01'],
+    );
+    await worker.evaluate(() => {
+      chrome.runtime.onMessage.removeListener(self.__libraryImportObserver);
+      delete self.__libraryImportObserver;
+      delete self.__libraryImportMessages;
+    });
+    await page.evaluate(() => {
+      window.__restoreFileText();
+      delete window.__restoreFileText;
+      delete window.__releaseSlowFile;
+    });
+
+    const clearAfterRace = page.getByRole('button', { name: 'Delete all data', exact: true });
+    await clearAfterRace.click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Delete everything', exact: true })
+      .click();
+    await page.getByText('No saved lessons yet.', { exact: true }).waitFor();
+
     await englishImport.setInputFiles({
       name: 'Моя копия.json',
       mimeType: 'application/json',
@@ -389,7 +610,10 @@ function copyExtension(target) {
 
     const englishUi = await page.evaluate(() => {
       const clone = document.body.cloneNode(true);
-      clone.querySelectorAll('.user-content, dialog:not([open])').forEach((node) => node.remove());
+      clone.querySelectorAll('.user-content').forEach((node) => {
+        if (!node.parentElement?.matches('.lesson-card > .meta')) node.remove();
+      });
+      clone.querySelectorAll('dialog:not([open])').forEach((node) => node.remove());
       const holder = document.createElement('div');
       holder.hidden = true;
       holder.append(clone);
@@ -401,21 +625,51 @@ function copyExtension(target) {
     assert.doesNotMatch(englishUi, /[А-Яа-яЁё]/u, 'English UI copy must not mix languages');
 
     await page.setViewportSize({ width: 320, height: 800 });
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= 320), true);
-    const helpBox = await page
-      .getByRole('button', { name: 'How to practice', exact: true })
-      .boundingBox();
-    assert.ok(helpBox && helpBox.x >= 0 && helpBox.x + helpBox.width <= 320);
+    await englishHelpTrigger.click();
+    await assertDialogReflow(page, page.getByRole('dialog'), 'Close');
+    await page.keyboard.press('Escape');
+    assert.equal(
+      await englishHelpTrigger.evaluate((element) => element === document.activeElement),
+      true,
+    );
+    const longBackupName = `backup-${'very-long-name-'.repeat(12)}.json`;
+    await englishImport.setInputFiles({
+      name: longBackupName,
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(backup)),
+    });
+    await page.waitForFunction(() => !document.querySelector('#apply-import').disabled);
+    assert.match(await page.getByRole('dialog').innerText(), /Backup import.*Lessons skipped: 2/s);
+    await assertDialogReflow(page, page.getByRole('dialog'), 'Import');
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.equal(
+      await englishImport.evaluate((element) => element === document.activeElement),
+      true,
+    );
 
     await page.setViewportSize({ width: 640, height: 900 });
     await page.evaluate(() => {
       document.documentElement.style.zoom = '2';
     });
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= 640), true);
-    const clearBox = await page
-      .getByRole('button', { name: 'Delete all data', exact: true })
-      .boundingBox();
-    assert.ok(clearBox && clearBox.x >= 0 && clearBox.x + clearBox.width <= 640);
+    await englishHelpTrigger.click();
+    await assertDialogReflow(page, page.getByRole('dialog'), 'Close');
+    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+    assert.equal(
+      await englishHelpTrigger.evaluate((element) => element === document.activeElement),
+      true,
+    );
+    await englishImport.setInputFiles({
+      name: longBackupName,
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(backup)),
+    });
+    await page.waitForFunction(() => !document.querySelector('#apply-import').disabled);
+    await assertDialogReflow(page, page.getByRole('dialog'), 'Import');
+    await page.keyboard.press('Escape');
+    assert.equal(
+      await englishImport.evaluate((element) => element === document.activeElement),
+      true,
+    );
 
     for (const dialog of await page.locator('dialog').all()) {
       const labelledBy = await dialog.getAttribute('aria-labelledby');

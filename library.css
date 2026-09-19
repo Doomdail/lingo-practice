@@ -262,8 +262,8 @@ section > h2 {
 }
 
 dialog {
-  width: min(34rem, calc(100vw - 2rem));
-  max-width: min(34rem, calc(100vw - 2rem));
+  width: min(34rem, calc(50vw - 1rem));
+  max-width: min(34rem, calc(50vw - 1rem));
   max-height: calc(100vh - 2rem);
   padding: 0;
   border: 0;
@@ -356,6 +356,11 @@ dialog h2 {
 
   section {
     padding: 0.85rem;
+  }
+
+  dialog {
+    width: calc(100vw - 1.5rem);
+    max-width: calc(100vw - 1.5rem);
   }
 
   .card-actions,
