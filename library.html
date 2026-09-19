@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Мои занятия · Lingo Practice</title>
+    <link rel="stylesheet" href="library.css" />
+    <script src="i18n.js" defer></script>
+    <script src="exercise.js" defer></script>
+    <script src="data.js" defer></script>
+    <script src="library.js" defer></script>
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">LINGO PRACTICE</p>
+        <h1 data-i18n="Мои занятия">Мои занятия</h1>
+      </div>
+      <button id="refresh-library" class="secondary" type="button" data-i18n="Обновить библиотеку">
+        Обновить библиотеку
+      </button>
+    </header>
+
+    <nav class="section-nav" aria-label="Разделы" data-i18n-aria-label="Разделы">
+      <a href="#lessons" data-i18n="Занятия">Занятия</a>
+      <a href="#words" data-i18n="Трудные слова">Трудные слова</a>
+      <a href="#data-help" data-i18n="Данные и помощь">Данные и помощь</a>
+    </nav>
+
+    <p id="load-status" class="status" data-i18n="Загрузка библиотеки…">Загрузка библиотеки…</p>
+    <p id="invalid-warning" class="warning" role="status" hidden></p>
+    <p id="load-error" class="error" role="alert" hidden></p>
+
+    <main>
+      <section id="lessons" aria-labelledby="lessons-title" tabindex="-1">
+        <h2 id="lessons-title" data-i18n="Занятия">Занятия</h2>
+        <div id="lesson-list"></div>
+      </section>
+
+      <section id="words" aria-labelledby="words-title" tabindex="-1">
+        <div class="section-heading">
+          <h2 id="words-title" data-i18n="Трудные слова">Трудные слова</h2>
+          <button id="download-csv" class="secondary" type="button" data-i18n="Скачать CSV">
+            Скачать CSV
+          </button>
+        </div>
+        <div class="word-controls">
+          <label for="word-search" data-i18n="Поиск по словам и контексту">
+            Поиск по словам и контексту
+          </label>
+          <input
+            id="word-search"
+            type="search"
+            data-i18n-placeholder="Поиск по словам и контексту"
+          />
+          <label for="word-sort" data-i18n="Сортировка">Сортировка</label>
+          <select id="word-sort">
+            <option value="difficulty" data-i18n="По сложности">По сложности</option>
+            <option value="recent" data-i18n="По последнему появлению">
+              По последнему появлению
+            </option>
+          </select>
+        </div>
+        <div id="word-list"></div>
+      </section>
+
+      <section id="data-help" aria-labelledby="data-title" tabindex="-1">
+        <h2 id="data-title" data-i18n="Данные и помощь">Данные и помощь</h2>
+        <div class="data-actions">
+          <button id="export-backup" type="button" data-i18n="Экспортировать резервную копию">
+            Экспортировать резервную копию
+          </button>
+          <div class="file-control">
+            <label for="backup-file" data-i18n="Файл резервной копии"> Файл резервной копии </label>
+            <input id="backup-file" type="file" accept=".json,application/json" />
+          </div>
+          <button id="clear-data" class="danger" type="button" data-i18n="Удалить все данные">
+            Удалить все данные
+          </button>
+          <button id="show-help" class="secondary" type="button" data-i18n="Как заниматься">
+            Как заниматься
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+      <form method="dialog">
+        <h2 id="confirm-title"></h2>
+        <p class="dialog-message user-content"></p>
+        <div class="dialog-actions">
+          <button value="cancel" class="secondary" data-i18n="Отмена">Отмена</button>
+          <button id="confirm-action" value="confirm" class="danger">Удалить</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="export-dialog" aria-labelledby="export-title">
+      <form method="dialog">
+        <h2 id="export-title" data-i18n="Экспорт резервной копии">Экспорт резервной копии</h2>
+        <p
+          data-i18n="В резервную копию входят открытый текст субтитров, правильные и введённые ответы."
+        >
+          В резервную копию входят открытый текст субтитров, правильные и введённые ответы.
+        </p>
+        <p id="export-warning" class="warning" role="status" hidden></p>
+        <p id="export-error" class="error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button value="cancel" class="secondary" data-i18n="Отмена">Отмена</button>
+          <button id="download-backup" type="button" data-i18n="Скачать JSON">Скачать JSON</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="import-dialog" aria-labelledby="import-title">
+      <form method="dialog">
+        <h2 id="import-title" data-i18n="Импорт резервной копии">Импорт резервной копии</h2>
+        <p class="file-name"><span id="import-file-name" class="user-content"></span></p>
+        <div id="import-summary" class="import-summary" aria-live="polite"></div>
+        <p id="import-warning" class="warning" role="status" hidden></p>
+        <p id="import-error" class="error" role="alert" hidden></p>
+        <label class="check-row">
+          <input id="import-preferences" type="checkbox" />
+          <span data-i18n="Импортировать настройки">Импортировать настройки</span>
+        </label>
+        <div class="dialog-actions">
+          <button value="cancel" class="secondary" data-i18n="Отмена">Отмена</button>
+          <button id="apply-import" type="button" data-i18n="Импортировать" disabled>
+            Импортировать
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="help-dialog" aria-labelledby="help-title">
+      <form method="dialog">
+        <h2 id="help-title" data-i18n="Как заниматься">Как заниматься</h2>
+        <ol>
+          <li data-i18n="Выберите дорожку или импортируйте SRT/VTT.">
+            Выберите дорожку или импортируйте SRT/VTT.
+          </li>
+          <li data-i18n="Слушайте, вписывайте слово и нажимайте Enter.">
+            Слушайте, вписывайте слово и нажимайте Enter.
+          </li>
+          <li data-i18n="Используйте повтор и подсказки; прогресс сохраняется автоматически.">
+            Используйте повтор и подсказки; прогресс сохраняется автоматически.
+          </li>
+        </ol>
+        <div class="dialog-actions">
+          <button value="cancel" data-i18n="Закрыть">Закрыть</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

@@ -1,7 +1,11 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const exercise = require('../exercise.js');
 const data = require('../data.js');
+
+const root = path.resolve(__dirname, '..');
 
 const cue = (text, id = 0) => ({ id, start: id * 3, end: id * 3 + 2, text });
 const task = (overrides = {}) => ({ ...exercise.create(cue('Hello friend')), ...overrides });
@@ -50,6 +54,15 @@ const lessonWithUnansweredDifficultTask = session('unanswered01', 30, [
     mistakes: 1,
   }),
 ]);
+
+test('manifest exposes a tabbed options page without adding permissions', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+  assert.deepEqual(manifest.options_ui, { page: 'library.html', open_in_tab: true });
+  assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage']);
+  for (const file of ['library.html', 'library.js', 'library.css'])
+    assert.ok(fs.existsSync(path.join(root, file)), file);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'library.js'), 'utf8'), /chrome\.storage/);
+});
 
 test('vocabulary joins profile with the newest available difficult context', () => {
   const entries = data.vocabulary(profile, [olderLesson, newerLesson]);
