@@ -1,5 +1,5 @@
 'use strict';
-importScripts('youtube.js', 'exercise.js');
+importScripts('youtube.js', 'exercise.js', 'data.js');
 let storageQueue = Promise.resolve();
 
 async function toggleTab(tab) {
@@ -32,6 +32,22 @@ async function toggleTab(tab) {
 chrome.action.onClicked.addListener(toggleTab);
 
 const LESSON_ACTIONS = new Set(['get', 'save']);
+const LIBRARY_ACTIONS = new Set([
+  'list',
+  'vocabulary',
+  'delete',
+  'clear',
+  'export',
+  'previewImport',
+  'import',
+]);
+const validVideoId = (value) => typeof value === 'string' && /^[\w-]{1,64}$/.test(value);
+const isLibrarySender = (message, sender) =>
+  message?.type === 'LINGO_LIBRARY' &&
+  LIBRARY_ACTIONS.has(message.action) &&
+  sender?.id === chrome.runtime.id &&
+  sender.frameId === 0 &&
+  sender.url === chrome.runtime.getURL('library.html');
 const isLessonSender = (message, sender) =>
   message?.type === 'LINGO_STORE' &&
   LESSON_ACTIONS.has(message.action) &&
@@ -60,6 +76,13 @@ const readEpoch = (value) =>
 const readRevision = (record) =>
   Number.isSafeInteger(record?.revision) && record.revision >= 0 ? record.revision : 0;
 const isTombstone = (record) => record?.deleted === true;
+const validCounter = (value) => Number.isSafeInteger(value) && value >= 0;
+const invalidMessage = () => ({ error: 'Некорректные данные запроса.', code: 'INVALID_MESSAGE' });
+const epochConflict = (storageEpoch) => ({
+  error: 'Хранилище изменено. Обновите библиотеку.',
+  code: 'EPOCH_CONFLICT',
+  storageEpoch,
+});
 
 async function ensureWordProfile(snapshot) {
   const words = snapshot.wordProfile?.words;
@@ -172,7 +195,171 @@ async function handleLessonMessage(message) {
   return { saved: true, version: session ? version + 1 : version, storageEpoch };
 }
 
+function collectLessons(snapshot) {
+  const sessions = [];
+  let invalidCount = 0;
+  for (const [key, record] of Object.entries(snapshot)) {
+    if (!key.startsWith('lesson:') || isTombstone(record)) continue;
+    const videoId = key.slice(7);
+    const session = validVideoId(videoId) && LingoExercise.restoreSession(record, videoId);
+    if (session) sessions.push(session);
+    else invalidCount++;
+  }
+  return { sessions, invalidCount };
+}
+
+function currentState(snapshot, sessions) {
+  const words = snapshot.wordProfile?.words;
+  const profile =
+    words && typeof words === 'object' && !Array.isArray(words)
+      ? LingoExercise.restoreWordProfile(snapshot.wordProfile, true)
+      : null;
+  return {
+    lessons: sessions,
+    preferences: LingoExercise.preferences(snapshot.preferences ?? {}),
+    wordProfile: profile ?? LingoExercise.buildWordProfile(sessions),
+  };
+}
+
+async function handleLibraryMessage(message) {
+  if (message.action === 'clear' && !validCounter(message.expectedEpoch)) return invalidMessage();
+  const summaryKeys = ['added', 'updated', 'skipped', 'wordsUpdated'];
+  if (
+    message.action === 'import' &&
+    (!validCounter(message.expectedEpoch) ||
+      !message.expectedSummary ||
+      typeof message.expectedSummary !== 'object' ||
+      Array.isArray(message.expectedSummary) ||
+      !summaryKeys.every((key) => validCounter(message.expectedSummary[key])))
+  )
+    return invalidMessage();
+  if (
+    message.action === 'delete' &&
+    (!validVideoId(message.videoId) ||
+      !validCounter(message.expectedRevision) ||
+      !validCounter(message.expectedEpoch))
+  )
+    return invalidMessage();
+  const snapshot = await chrome.storage.local.get(null);
+  const storageEpoch = readEpoch(snapshot.storageEpoch);
+  if (storageEpoch === null) throw new Error('Invalid storage epoch');
+  if (message.action === 'clear') {
+    if (message.expectedEpoch !== storageEpoch) return epochConflict(storageEpoch);
+    if (storageEpoch === Number.MAX_SAFE_INTEGER) return invalidMessage();
+    const cleared = {
+      storageEpoch: storageEpoch + 1,
+      preferences: LingoExercise.preferences(),
+      wordProfile: { schema: 1, words: {} },
+    };
+    for (const [key, record] of Object.entries(snapshot)) {
+      if (key.startsWith('lesson:')) {
+        const revision = readRevision(record);
+        if (revision === Number.MAX_SAFE_INTEGER) return invalidMessage();
+        cleared[key] = { deleted: true, revision: revision + 1 };
+      } else if (!Object.hasOwn(cleared, key))
+        Object.defineProperty(cleared, key, { value: null, enumerable: true });
+    }
+    // This commit removes user content and invalidates every old tab before optional cleanup.
+    await chrome.storage.local.set(cleared);
+    let cleanupPending = false;
+    try {
+      await chrome.storage.local.remove(
+        Object.keys(snapshot).filter((key) => key !== 'storageEpoch'),
+      );
+    } catch {
+      cleanupPending = true;
+    }
+    return {
+      cleared: true,
+      storageEpoch: storageEpoch + 1,
+      ...(cleanupPending ? { cleanupPending: true } : {}),
+    };
+  }
+  const { sessions, invalidCount } = collectLessons(snapshot);
+  const state = currentState(snapshot, sessions);
+  if (message.action === 'delete') {
+    if (message.expectedEpoch !== storageEpoch) return epochConflict(storageEpoch);
+    const key = 'lesson:' + message.videoId;
+    const record = snapshot[key];
+    const revision = readRevision(record);
+    if (message.expectedRevision !== revision)
+      return {
+        error: 'Занятие изменено. Обновите библиотеку.',
+        code: 'REVISION_CONFLICT',
+        revision,
+      };
+    if (record === undefined || isTombstone(record))
+      return { error: 'Занятие не найдено.', code: 'NOT_FOUND' };
+    if (revision === Number.MAX_SAFE_INTEGER) return invalidMessage();
+    // Preserve anonymous legacy history in the same commit that removes its last context.
+    await chrome.storage.local.set({
+      [key]: { deleted: true, revision: revision + 1 },
+      wordProfile: state.wordProfile,
+    });
+    return { deleted: true, revision: revision + 1, storageEpoch };
+  }
+  if (message.action === 'list') {
+    const lessons = sessions
+      .sort(
+        (a, b) =>
+          b.updatedAt - a.updatedAt || (a.videoId < b.videoId ? -1 : a.videoId > b.videoId ? 1 : 0),
+      )
+      .map((session) => {
+        const counts = LingoExercise.resultCounts(session.tasks);
+        return {
+          videoId: session.videoId,
+          title: session.title,
+          sourceLabel: session.sourceLabel,
+          updatedAt: session.updatedAt,
+          position: session.position,
+          completed: counts.total - counts.remaining,
+          total: counts.total,
+          revision: readRevision(snapshot['lesson:' + session.videoId]),
+        };
+      });
+    return { lessons, invalidCount, preferences: state.preferences, storageEpoch };
+  }
+  if (message.action === 'vocabulary')
+    return { words: LingoData.vocabulary(state.wordProfile, sessions), invalidCount, storageEpoch };
+  if (message.action === 'export') {
+    const parsed = LingoData.parseBackup(LingoData.createBackup(state));
+    if (!parsed.ok) return { error: parsed.message, code: 'INVALID_BACKUP' };
+    return { backup: parsed.backup, invalidCount, storageEpoch };
+  }
+  if (message.action === 'previewImport' || message.action === 'import') {
+    if (message.action === 'import' && message.expectedEpoch !== storageEpoch)
+      return epochConflict(storageEpoch);
+    const parsed = LingoData.parseBackup(message.backup);
+    if (!parsed.ok) return { error: parsed.message, code: 'INVALID_BACKUP' };
+    const plan = LingoData.planBackupImport(
+      state,
+      parsed.backup,
+      message.importPreferences === true,
+    );
+    if (message.action === 'previewImport')
+      return { summary: plan.summary, invalidLocalCount: invalidCount, storageEpoch };
+    if (!summaryKeys.every((key) => plan.summary[key] === message.expectedSummary[key]))
+      return {
+        error: 'Данные изменились. Повторите предпросмотр импорта.',
+        code: 'IMPORT_CHANGED',
+      };
+    const changes = { wordProfile: plan.next.wordProfile, storageEpoch };
+    const writerId = `import:${crypto.randomUUID()}`;
+    for (const lesson of plan.changedLessons) {
+      const key = 'lesson:' + lesson.videoId;
+      const revision = readRevision(snapshot[key]);
+      if (revision === Number.MAX_SAFE_INTEGER) return invalidMessage();
+      changes[key] = { ...lesson, revision: revision + 1, writerId };
+    }
+    if (message.importPreferences === true) changes.preferences = plan.next.preferences;
+    await chrome.storage.local.set(changes);
+    return { imported: true, summary: plan.summary, storageEpoch };
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (isLibrarySender(message, sender))
+    return enqueue(() => handleLibraryMessage(message), sendResponse);
   if (isLessonSender(message, sender))
     return enqueue(() => handleLessonMessage(message), sendResponse);
   if (

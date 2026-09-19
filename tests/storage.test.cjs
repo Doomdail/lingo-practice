@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const exercise = require('../exercise.js');
+const backupData = require('../data.js');
+const { webcrypto } = require('node:crypto');
 const source = fs.readFileSync(path.join(__dirname, '../background.js'), 'utf8');
 const lessonSender = {
   id: 'lingo-test',
@@ -55,6 +57,8 @@ function worker(initial = {}, hooks = {}) {
     console,
     importScripts() {},
     LingoExercise: exercise,
+    LingoData: backupData,
+    crypto: webcrypto,
     chrome: {
       action: { onClicked: { addListener() {} } },
       runtime: {
@@ -136,6 +140,678 @@ test('only the extension main frame on a YouTube watch page reaches lesson stora
     assert.equal(await app.sendLesson({ action: 'get', videoId }), undefined);
   assert.equal(await app.sendLesson({ action: 'delete' }), undefined);
   assert.equal(app.reads(), 1);
+});
+
+const libraryLesson = (videoId, updatedAt, revision = 1) => ({
+  ...exercise.restoreSession(session('Hello'), 'video01'),
+  videoId,
+  updatedAt,
+  revision,
+  title: 'Lesson ' + videoId,
+  sourceLabel: 'English',
+  writerId: 'private-writer',
+  tasks: [{ ...session('Hello').tasks[0], mistakes: 1 }],
+});
+
+test('list is sorted, compact and reports invalid local records without leaking them', async () => {
+  const app = worker({
+    'lesson:older01': libraryLesson('older01', 10),
+    'lesson:newer01': libraryLesson('newer01', 20, 3),
+    'lesson:a_tied': libraryLesson('a_tied', 20),
+    'lesson:broken': { tasks: ['secret answer'], videoId: 'broken' },
+    'lesson:bad/id': libraryLesson('bad/id', 30),
+    'lesson:deleted': { deleted: true, revision: 9 },
+    preferences: null,
+  });
+  const result = await app.sendLibrary({ action: 'list' });
+  assert.ok(result, 'trusted library action must return a response');
+  assert.deepEqual(
+    result.lessons.map((item) => item.videoId),
+    ['a_tied', 'newer01', 'older01'],
+  );
+  assert.equal(result.invalidCount, 2);
+  assert.deepEqual(result.lessons[1], {
+    videoId: 'newer01',
+    title: 'Lesson newer01',
+    sourceLabel: 'English',
+    updatedAt: 20,
+    position: 0,
+    completed: 1,
+    total: 1,
+    revision: 3,
+  });
+  assert.equal(result.storageEpoch, 0);
+  assert.equal(result.preferences.fontSize, 18);
+  assert.doesNotMatch(JSON.stringify(result), /tasks|secret answer|private-writer|Hello/);
+});
+
+test('vocabulary returns compact difficult words with one allowed context', async () => {
+  const app = worker({ 'lesson:video01': libraryLesson('video01', 20, 3) });
+  const result = await app.sendLibrary({ action: 'vocabulary' });
+  assert.ok(result, 'trusted vocabulary action must return a response');
+  assert.deepEqual(result, {
+    words: [
+      {
+        word: 'hello',
+        attempts: 1,
+        clean: 0,
+        mistakes: 1,
+        hints: 0,
+        misses: 0,
+        lastSeenAt: 20,
+        score: 1,
+        context: {
+          text: 'Hello',
+          time: 0,
+          videoTitle: 'Lesson video01',
+          videoId: 'video01',
+          source: 'English',
+        },
+      },
+    ],
+    invalidCount: 0,
+    storageEpoch: 0,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /tasks|answer|value|writerId|revision/);
+});
+
+test('delete requires current revision and epoch and stale tabs cannot resurrect the lesson', async () => {
+  const app = worker({ 'lesson:video01': libraryLesson('video01', 20, 2) });
+  const remove = { action: 'delete', videoId: 'video01', expectedRevision: 2, expectedEpoch: 0 };
+  assert.equal(
+    (await app.sendLibrary({ ...remove, expectedRevision: 1 }))?.code,
+    'REVISION_CONFLICT',
+  );
+  assert.equal((await app.sendLibrary({ ...remove, expectedEpoch: 1 })).code, 'EPOCH_CONFLICT');
+  assert.deepEqual(await app.sendLibrary(remove), { deleted: true, revision: 3, storageEpoch: 0 });
+  assert.deepEqual(app.snapshot()['lesson:video01'], { deleted: true, revision: 3 });
+  assert.equal(
+    (await app.sendLesson(save('Hello', 2, 'private-writer', undefined, 0))).code,
+    'REVISION_CONFLICT',
+  );
+  assert.equal((await app.sendLibrary({ ...remove, expectedRevision: 3 })).code, 'NOT_FOUND');
+  assert.equal(
+    (await app.sendLibrary({ ...remove, videoId: 'missing', expectedRevision: 0 })).code,
+    'NOT_FOUND',
+  );
+});
+
+test('vocabulary keeps anonymous legacy stats after lesson deletion but removes its context', async () => {
+  const app = worker({ 'lesson:video01': libraryLesson('video01', 20, 3) });
+  const before = await app.sendLibrary({ action: 'vocabulary' });
+  assert.equal(before.words[0].context.text, 'Hello');
+  assert.equal(
+    (
+      await app.sendLibrary({
+        action: 'delete',
+        videoId: 'video01',
+        expectedRevision: 3,
+        expectedEpoch: 0,
+      })
+    )?.deleted,
+    true,
+  );
+  const after = await app.sendLibrary({ action: 'vocabulary' });
+  assert.equal(after.words[0].attempts, before.words[0].attempts);
+  assert.equal(after.words[0].context, null);
+  assert.doesNotMatch(JSON.stringify(app.snapshot()), /Hello|private-writer|tasks/);
+});
+
+test('delete rejects malformed counters and overflow without modifying state', async () => {
+  const app = worker({ 'lesson:video01': libraryLesson('video01', 20, 2) });
+  const before = app.snapshot();
+  for (const patch of [
+    { videoId: '../video01' },
+    { videoId: 'video01\n' },
+    ...[null, undefined, -1, 1.5, '2', Number.MAX_SAFE_INTEGER + 1].flatMap((value) => [
+      { expectedEpoch: value },
+      { expectedRevision: value },
+    ]),
+  ]) {
+    assert.equal(
+      (
+        await app.sendLibrary({
+          action: 'delete',
+          videoId: 'video01',
+          expectedRevision: 2,
+          expectedEpoch: 0,
+          ...patch,
+        })
+      )?.code,
+      'INVALID_MESSAGE',
+    );
+    assert.deepEqual(app.snapshot(), before);
+  }
+  const overflow = worker({
+    'lesson:video01': libraryLesson('video01', 20, Number.MAX_SAFE_INTEGER),
+  });
+  assert.equal(
+    (
+      await overflow.sendLibrary({
+        action: 'delete',
+        videoId: 'video01',
+        expectedRevision: Number.MAX_SAFE_INTEGER,
+        expectedEpoch: 0,
+      })
+    ).code,
+    'INVALID_MESSAGE',
+  );
+  assert.equal(overflow.snapshot()['lesson:video01'].revision, Number.MAX_SAFE_INTEGER);
+});
+
+const clearSeed = () => ({
+  'lesson:video01': { ...libraryLesson('video01', 20, 2), title: 'private caption' },
+  wordProfile: {
+    schema: 1,
+    words: { hello: { attempts: 1, clean: 0, mistakes: 1, hints: 0, misses: 0, lastSeenAt: 20 } },
+  },
+  preferences: { fontSize: 22 },
+  oldCache: 'private caption',
+});
+
+test('clear commits empty values with a new epoch before best-effort cleanup', async () => {
+  const writes = [];
+  const app = worker(clearSeed(), {
+    beforeSet: (values) => writes.push(structuredClone(values)),
+    beforeRemove: () => {
+      throw new Error('remove failed');
+    },
+  });
+  const result = await app.sendLibrary({ action: 'clear', expectedEpoch: 0 });
+  assert.deepEqual(result, { cleared: true, storageEpoch: 1, cleanupPending: true });
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0]['lesson:video01'], { deleted: true, revision: 3 });
+  assert.equal(writes[0].storageEpoch, 1);
+  assert.deepEqual((await app.sendLibrary({ action: 'list' })).lessons, []);
+  assert.deepEqual((await app.sendLibrary({ action: 'vocabulary' })).words, []);
+  assert.equal((await app.sendLibrary({ action: 'list' })).preferences.fontSize, 18);
+  assert.doesNotMatch(JSON.stringify(app.snapshot()), /private caption|hello/);
+  assert.equal((await app.sendLesson(save('Hello', 2))).code, 'EPOCH_CONFLICT');
+  assert.deepEqual(await app.sendLibrary({ action: 'clear', expectedEpoch: 1 }), {
+    cleared: true,
+    storageEpoch: 2,
+    cleanupPending: true,
+  });
+});
+
+test('failed primary clear set preserves the old epoch and all user values then permits retry', async () => {
+  let fail = true;
+  const app = worker(clearSeed(), {
+    beforeSet: () => {
+      if (fail) throw new Error('set failed');
+    },
+  });
+  const before = app.snapshot();
+  assert.equal(
+    (await app.sendLibrary({ action: 'clear', expectedEpoch: 0 }))?.code,
+    'STORAGE_ERROR',
+  );
+  assert.deepEqual(app.snapshot(), before);
+  fail = false;
+  assert.deepEqual(await app.sendLibrary({ action: 'clear', expectedEpoch: 0 }), {
+    cleared: true,
+    storageEpoch: 1,
+  });
+  assert.equal(app.snapshot().storageEpoch, 1);
+  assert.doesNotMatch(JSON.stringify(app.snapshot()), /private caption|hello/);
+  assert.equal((await app.sendLesson(save('Hello', 0))).code, 'EPOCH_CONFLICT');
+  assert.equal((await app.sendLesson(save('Hello', 0, 'fresh', undefined, 1))).saved, true);
+});
+
+test('clear rejects stale or invalid epochs and counter overflow before any writes', async () => {
+  for (const [seed, expectedEpoch, code] of [
+    [clearSeed(), 1, 'EPOCH_CONFLICT'],
+    ...[undefined, null, -1, 1.5, '0'].map((value) => [clearSeed(), value, 'INVALID_MESSAGE']),
+    [
+      { ...clearSeed(), storageEpoch: Number.MAX_SAFE_INTEGER },
+      Number.MAX_SAFE_INTEGER,
+      'INVALID_MESSAGE',
+    ],
+    [
+      { 'lesson:video01': libraryLesson('video01', 20, Number.MAX_SAFE_INTEGER) },
+      0,
+      'INVALID_MESSAGE',
+    ],
+  ]) {
+    const app = worker(seed);
+    assert.equal((await app.sendLibrary({ action: 'clear', expectedEpoch }))?.code, code);
+    assert.deepEqual(app.snapshot(), seed);
+  }
+});
+
+const importSeed = () => ({
+  'lesson:video01': libraryLesson('video01', 10, 2),
+  'lesson:equal01': libraryLesson('equal01', 20, 4),
+  preferences: { fontSize: 22 },
+  wordProfile: {
+    schema: 1,
+    words: { hello: { attempts: 2, clean: 0, mistakes: 2, hints: 0, misses: 0, lastSeenAt: 10 } },
+  },
+});
+const importBackup = () => ({
+  format: 'lingo-practice-backup',
+  version: 1,
+  exportedAt: '2026-09-19T12:00:00.000Z',
+  lessons: [
+    libraryLesson('video01', 30),
+    libraryLesson('equal01', 20),
+    libraryLesson('added01', 40),
+  ],
+  preferences: { ...exercise.preferences(), fontSize: 26 },
+  wordProfile: {
+    schema: 1,
+    words: { hello: { attempts: 3, clean: 1, mistakes: 2, hints: 0, misses: 0, lastSeenAt: 30 } },
+  },
+});
+
+test('export includes only normalized public data and preview never writes', async () => {
+  const app = worker({
+    ...importSeed(),
+    'lesson:broken': { schema: 9 },
+    'lesson:gone': { deleted: true, revision: 6 },
+    cache: 'secret',
+  });
+  const exported = await app.sendLibrary({ action: 'export' });
+  assert.ok(exported, 'export must return a backup');
+  assert.equal(exported.backup.lessons.length, 2);
+  assert.equal(exported.invalidCount, 1);
+  assert.equal(exported.storageEpoch, 0);
+  assert.equal(backupData.parseBackup(exported.backup).ok, true);
+  assert.doesNotMatch(
+    JSON.stringify(exported.backup),
+    /revision|writerId|storageEpoch|deleted|secret/,
+  );
+  const before = app.snapshot();
+  assert.deepEqual(
+    await app.sendLibrary({
+      action: 'previewImport',
+      backup: importBackup(),
+      importPreferences: false,
+    }),
+    {
+      summary: { added: 1, updated: 1, skipped: 1, wordsUpdated: 1 },
+      invalidLocalCount: 1,
+      storageEpoch: 0,
+    },
+  );
+  assert.deepEqual(app.snapshot(), before);
+});
+
+test('future duplicate and one-broken-session backups fail strict preview validation without writes', async () => {
+  const future = { ...importBackup(), version: 2 };
+  const duplicate = importBackup();
+  duplicate.lessons.push(duplicate.lessons[0]);
+  const broken = importBackup();
+  broken.lessons.at(-1).tasks[0].end = -1;
+  const profile = { ...importBackup(), wordProfile: { schema: 1, words: true } };
+  for (const backup of [future, duplicate, broken, profile, null]) {
+    const app = worker(importSeed());
+    const before = app.snapshot();
+    assert.equal(
+      (await app.sendLibrary({ action: 'previewImport', backup, importPreferences: true }))?.code,
+      'INVALID_BACKUP',
+    );
+    assert.deepEqual(app.snapshot(), before);
+  }
+});
+
+test('export applies strict backup limits and preview can derive legacy profile without writing it', async () => {
+  const app = worker({ 'lesson:video01': libraryLesson('video01', -1) });
+  assert.equal((await app.sendLibrary({ action: 'export' }))?.code, 'INVALID_BACKUP');
+  const legacy = worker({ 'lesson:video01': libraryLesson('video01', 10) });
+  const before = legacy.snapshot();
+  assert.equal(
+    (await legacy.sendLibrary({ action: 'previewImport', backup: importBackup() })).summary
+      .wordsUpdated,
+    1,
+  );
+  assert.deepEqual(legacy.snapshot(), before);
+});
+
+test('import re-reads state and rejects a changed preview before assigning new revisions', async () => {
+  const app = worker(importSeed());
+  const backup = importBackup();
+  const preview = await app.sendLibrary({
+    action: 'previewImport',
+    backup,
+    importPreferences: true,
+  });
+  await app.sendLesson({
+    ...save('Hello', 2, 'local-writer'),
+    session: { ...session('Hello'), updatedAt: 50 },
+  });
+  const before = app.snapshot();
+  const request = {
+    action: 'import',
+    backup,
+    importPreferences: true,
+    expectedEpoch: preview.storageEpoch,
+    expectedSummary: preview.summary,
+  };
+  assert.equal((await app.sendLibrary(request))?.code, 'IMPORT_CHANGED');
+  assert.deepEqual(app.snapshot(), before);
+  const next = await app.sendLibrary({ action: 'previewImport', backup, importPreferences: true });
+  assert.deepEqual(await app.sendLibrary({ ...request, expectedSummary: next.summary }), {
+    imported: true,
+    summary: { added: 1, updated: 0, skipped: 2, wordsUpdated: 1 },
+    storageEpoch: 0,
+  });
+  assert.equal(app.snapshot()['lesson:video01'].updatedAt, 50);
+  assert.equal(app.snapshot()['lesson:added01'].revision, 1);
+  assert.equal(app.snapshot().preferences.fontSize, 26);
+});
+
+test('import uses one atomic set, advances tombstone revisions and never sums or replays history', async () => {
+  const writes = [];
+  const seed = { ...importSeed(), 'lesson:added01': { deleted: true, revision: 8 } };
+  const app = worker(seed, { beforeSet: (changes) => writes.push(structuredClone(changes)) });
+  const backup = importBackup();
+  const preview = await app.sendLibrary({
+    action: 'previewImport',
+    backup,
+    importPreferences: false,
+  });
+  const result = await app.sendLibrary({
+    action: 'import',
+    backup,
+    importPreferences: false,
+    expectedEpoch: 0,
+    expectedSummary: preview.summary,
+  });
+  assert.deepEqual(result, {
+    imported: true,
+    summary: { added: 1, updated: 1, skipped: 1, wordsUpdated: 1 },
+    storageEpoch: 0,
+  });
+  assert.equal(writes.length, 1);
+  assert.deepEqual(Object.keys(writes[0]).sort(), [
+    'lesson:added01',
+    'lesson:video01',
+    'storageEpoch',
+    'wordProfile',
+  ]);
+  const stored = app.snapshot();
+  assert.equal(stored['lesson:added01'].revision, 9);
+  assert.equal(stored['lesson:added01'].updatedAt, 40);
+  assert.equal(stored['lesson:video01'].revision, 3);
+  assert.match(stored['lesson:video01'].writerId, /^import:/);
+  assert.equal(stored['lesson:video01'].writerId, stored['lesson:added01'].writerId);
+  assert.deepEqual(stored['lesson:equal01'], seed['lesson:equal01']);
+  assert.equal(stored.preferences.fontSize, 22);
+  assert.equal(stored.wordProfile.words.hello.attempts, 3);
+  assert.doesNotMatch(JSON.stringify(result), /tasks|sessions|writerId|Hello/);
+  const replay = await app.sendLibrary({ action: 'previewImport', backup });
+  assert.deepEqual(replay.summary, { added: 0, updated: 0, skipped: 3, wordsUpdated: 0 });
+  assert.equal(
+    (
+      await app.sendLibrary({
+        action: 'import',
+        backup,
+        expectedEpoch: 0,
+        expectedSummary: replay.summary,
+      })
+    ).imported,
+    true,
+  );
+  assert.deepEqual(app.snapshot(), stored);
+});
+
+test('import rejects malformed messages, epoch conflicts, invalid backups and revision overflow without writes', async () => {
+  const valid = {
+    action: 'import',
+    backup: importBackup(),
+    importPreferences: true,
+    expectedEpoch: 0,
+    expectedSummary: { added: 1, updated: 1, skipped: 1, wordsUpdated: 1 },
+  };
+  for (const [patch, code] of [
+    [{ expectedEpoch: 1 }, 'EPOCH_CONFLICT'],
+    [{ expectedEpoch: null }, 'INVALID_MESSAGE'],
+    [{ expectedEpoch: undefined }, 'INVALID_MESSAGE'],
+    [{ expectedSummary: undefined }, 'INVALID_MESSAGE'],
+    [{ expectedSummary: { ...valid.expectedSummary, added: '1' } }, 'INVALID_MESSAGE'],
+    [{ expectedSummary: { ...valid.expectedSummary, added: 2 } }, 'IMPORT_CHANGED'],
+    [{ backup: { ...importBackup(), version: 2 } }, 'INVALID_BACKUP'],
+  ]) {
+    const app = worker(importSeed());
+    const before = app.snapshot();
+    assert.equal((await app.sendLibrary({ ...valid, ...patch }))?.code, code);
+    assert.deepEqual(app.snapshot(), before);
+  }
+  const seed = {
+    ...importSeed(),
+    'lesson:added01': { deleted: true, revision: Number.MAX_SAFE_INTEGER },
+  };
+  const app = worker(seed);
+  assert.equal((await app.sendLibrary(valid)).code, 'INVALID_MESSAGE');
+  assert.deepEqual(app.snapshot(), seed);
+});
+
+test('failed import set leaves lessons preferences profile and epoch untouched and permits retry', async () => {
+  let fail = true;
+  const writes = [];
+  const app = worker(importSeed(), {
+    beforeSet: (values) => {
+      if (fail) throw new Error('quota');
+      writes.push(structuredClone(values));
+    },
+  });
+  const request = {
+    action: 'import',
+    backup: importBackup(),
+    importPreferences: true,
+    expectedEpoch: 0,
+    expectedSummary: { added: 1, updated: 1, skipped: 1, wordsUpdated: 1 },
+  };
+  const before = app.snapshot();
+  assert.equal((await app.sendLibrary(request))?.code, 'STORAGE_ERROR');
+  assert.deepEqual(app.snapshot(), before);
+  fail = false;
+  assert.equal((await app.sendLibrary(request)).imported, true);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(Object.keys(writes[0]).sort(), [
+    'lesson:added01',
+    'lesson:video01',
+    'preferences',
+    'storageEpoch',
+    'wordProfile',
+  ]);
+  assert.equal(app.snapshot().preferences.fontSize, 26);
+});
+
+test('only the exact extension library main-frame URL can perform allowed admin actions', async () => {
+  const app = worker(importSeed());
+  assert.equal((await app.sendLibrary({ action: 'list' })).lessons.length, 2);
+  const before = app.snapshot();
+  const reads = app.reads();
+  for (const patch of [
+    { url: librarySender.url + '?q=1' },
+    { url: librarySender.url + '#section' },
+    { url: librarySender.url + '/' },
+    { url: 'chrome-extension://foreign/library.html' },
+    { url: 'https://example.test/library.html' },
+    { url: 'chrome-extension://lingo-test/popup.html' },
+    { frameId: 1 },
+    { frameId: undefined },
+    { id: 'foreign' },
+    { id: undefined },
+  ]) {
+    for (const action of [
+      'list',
+      'vocabulary',
+      'delete',
+      'clear',
+      'export',
+      'previewImport',
+      'import',
+    ])
+      assert.equal(
+        await app.sendLibrary({ action, expectedEpoch: 0 }, { ...librarySender, ...patch }),
+        undefined,
+      );
+  }
+  for (const action of ['get', 'save', 'unknown', undefined])
+    assert.equal(await app.sendLibrary({ action }), undefined);
+  for (const action of [
+    'list',
+    'vocabulary',
+    'delete',
+    'clear',
+    'export',
+    'previewImport',
+    'import',
+  ]) {
+    assert.equal(await app.sendLesson({ action }), undefined);
+    assert.equal(
+      await app.sendRaw({ type: 'LINGO_STORE', action, videoId: 'video01' }, librarySender),
+      undefined,
+    );
+  }
+  assert.equal(app.reads(), reads);
+  assert.deepEqual(app.snapshot(), before);
+});
+
+test('library reads and delete wait for a pending lesson save and check its committed revision', async () => {
+  let release, started;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const writing = new Promise((resolve) => {
+    started = resolve;
+  });
+  let first = true;
+  const app = worker(
+    {},
+    {
+      beforeSet: async () => {
+        if (first) {
+          first = false;
+          started();
+          await blocked;
+        }
+      },
+    },
+  );
+  const saved = app.sendLesson(save('Hello'));
+  await writing;
+  let listed = false;
+  const list = app.sendLibrary({ action: 'list' }).then((value) => {
+    listed = true;
+    return value;
+  });
+  const deleted = app.sendLibrary({
+    action: 'delete',
+    videoId: 'video01',
+    expectedRevision: 0,
+    expectedEpoch: 0,
+  });
+  await new Promise(setImmediate);
+  assert.equal(listed, false);
+  release();
+  assert.equal((await saved).version, 1);
+  assert.equal((await list).lessons[0].revision, 1);
+  assert.equal((await deleted).code, 'REVISION_CONFLICT');
+  assert.equal(app.snapshot()['lesson:video01'].revision, 1);
+});
+
+test('clear cleanup stays in the shared queue before a fresh-epoch lesson save', async () => {
+  let release, started;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const removing = new Promise((resolve) => {
+    started = resolve;
+  });
+  const app = worker(clearSeed(), {
+    beforeRemove: async () => {
+      started();
+      await blocked;
+    },
+  });
+  const clear = app.sendLibrary({ action: 'clear', expectedEpoch: 0 });
+  await removing;
+  const fresh = app.sendLesson(save('Hello', 0, 'fresh', undefined, 1));
+  await new Promise(setImmediate);
+  assert.deepEqual(app.snapshot()['lesson:video01'], { deleted: true, revision: 3 });
+  release();
+  assert.equal((await clear).storageEpoch, 1);
+  assert.equal((await fresh).saved, true);
+  assert.equal(app.snapshot()['lesson:video01'].revision, 1);
+  assert.equal(app.snapshot()['lesson:video01'].tasks[0].status, 'correct');
+});
+
+test('import revalidates the supplied backup and current epoch after preview', async () => {
+  const app = worker(importSeed());
+  const backup = importBackup();
+  const preview = await app.sendLibrary({ action: 'previewImport', backup });
+  const before = app.snapshot();
+  const broken = structuredClone(backup);
+  broken.lessons.at(-1).tasks[0].end = -1;
+  const request = {
+    action: 'import',
+    expectedEpoch: preview.storageEpoch,
+    expectedSummary: preview.summary,
+  };
+  assert.equal((await app.sendLibrary({ ...request, backup: broken })).code, 'INVALID_BACKUP');
+  assert.deepEqual(app.snapshot(), before);
+  await app.sendLibrary({ action: 'clear', expectedEpoch: 0 });
+  const cleared = app.snapshot();
+  assert.equal((await app.sendLibrary({ ...request, backup })).code, 'EPOCH_CONFLICT');
+  assert.deepEqual(app.snapshot(), cleared);
+});
+
+test('delete failure preserves profile and library storage errors do not poison the shared queue', async () => {
+  let failRead = true,
+    failWrite = true;
+  const app = worker(importSeed(), {
+    beforeGet: () => {
+      if (failRead) {
+        failRead = false;
+        throw new Error('read');
+      }
+    },
+    beforeSet: () => {
+      if (failWrite) {
+        failWrite = false;
+        throw new Error('set');
+      }
+    },
+  });
+  const before = app.snapshot();
+  assert.equal((await app.sendLibrary({ action: 'list' })).code, 'STORAGE_ERROR');
+  const request = { action: 'delete', videoId: 'video01', expectedRevision: 2, expectedEpoch: 0 };
+  assert.equal((await app.sendLibrary(request)).code, 'STORAGE_ERROR');
+  assert.deepEqual(app.snapshot(), before);
+  assert.equal((await app.sendLibrary(request)).deleted, true);
+  assert.deepEqual(app.snapshot().wordProfile, before.wordProfile);
+  assert.equal((await app.sendLesson(save('Hello', 3, 'fresh'))).saved, true);
+});
+
+test('equal timestamp import keeps local word counters even when backup counters are larger', async () => {
+  const backup = importBackup();
+  backup.wordProfile.words.hello = {
+    attempts: 99,
+    clean: 0,
+    mistakes: 99,
+    hints: 0,
+    misses: 0,
+    lastSeenAt: 10,
+  };
+  const app = worker(importSeed());
+  const preview = await app.sendLibrary({ action: 'previewImport', backup });
+  assert.equal(preview.summary.wordsUpdated, 0);
+  assert.equal(
+    (
+      await app.sendLibrary({
+        action: 'import',
+        backup,
+        expectedEpoch: 0,
+        expectedSummary: preview.summary,
+      })
+    ).imported,
+    true,
+  );
+  assert.equal(app.snapshot().wordProfile.words.hello.attempts, 2);
 });
 
 test('lesson and library message namespaces cannot impersonate each other', async () => {
