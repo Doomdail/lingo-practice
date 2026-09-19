@@ -37,7 +37,10 @@
     rowAbort = new AbortController();
   const writerId = crypto.randomUUID();
   let storageVersion = 0,
-    preferenceChanges = {};
+    storageEpoch = 0,
+    saveBlocked = false,
+    preferenceChanges = {},
+    wordProfile = { schema: 1, words: {} };
   let noticeState = 'loading',
     noticeMessage = '';
   const i18n = globalThis.LingoI18n;
@@ -201,6 +204,12 @@
     ['easy', 'Лёгкая'],
     ['balanced', 'Обычная'],
     ['hard', 'Сложная'],
+    ['adaptive', 'Адаптивная'],
+  ]);
+  const gapFrequency = choice('Частота пропусков', [
+    ['dense', 'Часто'],
+    ['normal', 'Обычно'],
+    ['sparse', 'Редко'],
   ]);
   const videoSize = choice('Размер видео', [
     ['small', 'Компактное'],
@@ -236,10 +245,31 @@
       'Сложность меняет только ещё не начатые задания. На небольшом экране видимых строк может быть меньше выбранного числа.',
     ),
   );
-  settingsDialog.append(button('Закрыть настройки', 'primary', () => settingsDialog.close()));
+  settingsDialog.append(
+    button('Мои занятия', 'secondary', openLibrary),
+    button('Закрыть настройки', 'primary', () => settingsDialog.close()),
+  );
   const summaryDialog = el('dialog', 'summary-dialog');
   setAttr(summaryDialog, 'aria-label', 'Разбор ошибок');
-  shadow.append(settingsDialog, summaryDialog);
+  const sourceDialog = el('dialog', 'modal source-dialog');
+  const sourceDialogTitle = el('h2', '', 'Сменить источник субтитров?');
+  sourceDialogTitle.id = 'source-change-title';
+  sourceDialog.setAttribute('aria-labelledby', sourceDialogTitle.id);
+  const sourceDialogActions = el('div', 'dialog-actions');
+  sourceDialogActions.append(
+    button('Отмена', 'secondary', () => sourceDialog.close('cancel')),
+    button('Сменить субтитры', 'primary', () => sourceDialog.close('confirm')),
+  );
+  sourceDialog.append(
+    sourceDialogTitle,
+    el(
+      'p',
+      '',
+      'Смена субтитров начнёт новую тренировку и удалит текущие ответы, ошибки и подсказки для этого видео.',
+    ),
+    sourceDialogActions,
+  );
+  shadow.append(settingsDialog, summaryDialog, sourceDialog);
   listen(languageSelect, 'change', () => {
     prefs.language = languageSelect.value;
     preferenceChanges.language = prefs.language;
@@ -247,15 +277,15 @@
     saveNow();
   });
   listen(difficulty, 'change', () => {
-    prefs.difficulty = difficulty.value;
+    prefs = exercise.preferences({ ...prefs, difficulty: difficulty.value });
     preferenceChanges.difficulty = prefs.difficulty;
-    if (!review)
-      tasks = tasks.map((task) =>
-        !exercise.finished(task) && !task.value && !task.mistakes && !task.hints
-          ? exercise.create(task, Math.random, prefs.difficulty)
-          : task,
-      );
-    if (ready) draw();
+    rebuildUntouchedTasks();
+    saveNow();
+  });
+  listen(gapFrequency, 'change', () => {
+    prefs = exercise.preferences({ ...prefs, gapFrequency: gapFrequency.value });
+    preferenceChanges.gapFrequency = prefs.gapFrequency;
+    rebuildUntouchedTasks();
     saveNow();
   });
   for (const node of [videoSize, fontSize, visibleRows])
@@ -317,6 +347,7 @@
     stopSlowReplay();
     disposed = true;
     revision++;
+    if (sourceDialog.open) sourceDialog.close('cancel');
     abort.abort();
     mediaAbort?.abort();
     rowAbort.abort();
@@ -365,6 +396,7 @@
   }
   function applyPreferences() {
     difficulty.value = prefs.difficulty;
+    gapFrequency.value = prefs.gapFrequency;
     videoSize.value = prefs.videoSize;
     fontSize.value = prefs.fontSize;
     visibleRows.value = prefs.visibleRows;
@@ -419,12 +451,15 @@
       videoId,
       ...payload,
     });
-    if (result?.error) throw new Error(result.error);
+    if (result?.error)
+      throw Object.assign(new Error(result.error), {
+        code: result.code,
+      });
     if (!result) throw new Error('Обновите расширение: сохранение прогресса недоступно.');
     return result;
   }
   function saveNow() {
-    if (!initialized || disposed) return;
+    if (!initialized || disposed || saveBlocked) return Promise.resolve(false);
     lastSave = Date.now();
     if (
       !review &&
@@ -445,6 +480,7 @@
           approximate,
           offset,
           difficulty: prefs.difficulty,
+          gapFrequency: prefs.gapFrequency,
           position: review?.position ?? lastPosition,
           tasks: base.map((task) => ({ ...task })),
           updatedAt: Date.now(),
@@ -453,32 +489,40 @@
     const changed = preferenceChanges;
     preferenceChanges = {};
     setText(saveStatus, 'Сохраняем…');
-    storage('save', {
+    return storage('save', {
       session,
       writerId,
       version: storageVersion,
+      storageEpoch,
       ...(Object.keys(changed).length ? { preferences: changed } : {}),
     })
       .then((result) => {
         storageVersion = Math.max(storageVersion, result.version ?? 0);
+        storageEpoch = result.storageEpoch ?? storageEpoch;
         if (!disposed) {
           setText(saveStatus, 'Сохранено на устройстве');
           saveStatus.classList.remove('error');
         }
+        return true;
       })
       .catch((error) => {
-        for (const [key, value] of Object.entries(changed))
-          if (prefs[key] === value && !(key in preferenceChanges)) preferenceChanges[key] = value;
+        if (error.code === 'EPOCH_CONFLICT') saveBlocked = true;
+        else
+          for (const [key, value] of Object.entries(changed))
+            if (prefs[key] === value && !(key in preferenceChanges)) preferenceChanges[key] = value;
         if (!disposed) {
           setText(
             saveStatus,
-            error.message.includes('другой вкладке')
-              ? 'Прогресс обновлён в другой вкладке. Переоткройте тренировку.'
-              : 'Прогресс не сохранён',
+            error.code === 'EPOCH_CONFLICT'
+              ? error.message
+              : error.code === 'REVISION_CONFLICT' || error.message.includes('другой вкладке')
+                ? 'Прогресс обновлён в другой вкладке. Переоткройте тренировку.'
+                : 'Прогресс не сохранён',
           );
           setAttr(saveStatus, 'title', error.message);
           saveStatus.classList.add('error');
         }
+        return false;
       });
   }
   async function boot() {
@@ -486,6 +530,8 @@
       const saved = await storage('get');
       if (disposed) return;
       storageVersion = saved.version ?? 0;
+      storageEpoch = saved.storageEpoch ?? 0;
+      wordProfile = exercise.restoreWordProfile(saved.wordProfile);
       prefs = exercise.preferences(saved.preferences);
       const session = exercise.restoreSession(saved.session, videoId);
       if (session) {
@@ -494,6 +540,7 @@
         sourceSelection = session.sourceSelection;
         approximate = session.approximate;
         prefs.difficulty = session.difficulty;
+        prefs.gapFrequency = session.gapFrequency;
         offset = session.offset;
         setRawText(title, session.title);
         if (![...select.options].some((o) => o.value === sourceSelection))
@@ -533,10 +580,65 @@
     updateStats();
     tick();
   }
-  function commit(cues, label, selection, rounded = false) {
+  function setSourceBusy(value) {
+    busy = value;
+    select.disabled = value || Boolean(review);
+    importButton.disabled = value || Boolean(review);
+  }
+  async function openLibrary() {
+    await saveNow();
+    if (disposed) return;
+    settingsDialog.close();
+    await chrome.runtime.openOptionsPage();
+  }
+  function confirmSourceChange(returnFocus) {
+    return new Promise((resolve) => {
+      const finish = (confirmed) => {
+        sourceDialog.removeEventListener('close', onClose);
+        signal.removeEventListener('abort', onAbort);
+        setSourceBusy(false);
+        if (!disposed) returnFocus?.focus();
+        resolve(confirmed);
+      };
+      const onClose = () => finish(sourceDialog.returnValue === 'confirm');
+      const onAbort = () => finish(false);
+      sourceDialog.returnValue = 'cancel';
+      sourceDialog.addEventListener('close', onClose, { once: true });
+      signal.addEventListener('abort', onAbort, { once: true });
+      sourceDialog.showModal();
+    });
+  }
+  function rebuildUntouchedTasks() {
+    tasks = exercise.createTasks(tasks, {
+      random: Math.random,
+      difficulty: prefs.difficulty,
+      gapFrequency: prefs.gapFrequency,
+      wordProfile,
+      previousTasks: tasks,
+    });
+    if (ready) draw();
+  }
+  async function commit(cues, label, selection, rounded = false, returnFocus = select) {
+    const nextTasks = exercise.createTasks(cues, {
+      random: Math.random,
+      difficulty: prefs.difficulty,
+      gapFrequency: prefs.gapFrequency,
+      wordProfile,
+    });
+    if (!nextTasks.some((task) => task.answer))
+      throw new Error('В субтитрах не найдено слов для пропусков.');
+    if (ready && exercise.hasUserWork(review?.base ?? tasks)) {
+      const confirmed = await confirmSourceChange(returnFocus);
+      if (disposed) return false;
+      if (!confirmed) {
+        select.value = sourceSelection;
+        setNotice('source');
+        return false;
+      }
+    }
     if (review) leaveReview();
     stopSlowReplay();
-    tasks = cues.map((cue) => exercise.create(cue, Math.random, prefs.difficulty));
+    tasks = nextTasks;
     sourceLabel = label;
     sourceSelection = selection;
     approximate = rounded;
@@ -557,28 +659,25 @@
     previousTime = captionTime();
     draw();
     saveNow();
+    return true;
   }
   async function importFile() {
     const file = fileInput.files?.[0];
     if (!file) return;
     const ticket = ++revision;
-    busy = true;
-    select.disabled = true;
+    setSourceBusy(true);
     retry.hidden = true;
     try {
       if (!/\.(srt|vtt)$/i.test(file.name)) throw new Error('Выберите файл .srt или .vtt.');
       if (file.size > 2_000_000) throw new Error('Файл слишком большой: максимум 2 МБ.');
       const cues = exercise.parseSubtitles(await file.text());
       if (disposed || ticket !== revision) return;
-      commit(cues, file.name, 'file');
+      await commit(cues, file.name, 'file', false, importButton);
     } catch (error) {
       if (!disposed && ticket === revision) setNotice('error', error.message);
     } finally {
       fileInput.value = '';
-      if (!disposed && ticket === revision) {
-        busy = false;
-        select.disabled = Boolean(review);
-      }
+      if (!disposed && ticket === revision) setSourceBusy(false);
     }
   }
   async function load(desired = select.value) {
@@ -588,10 +687,9 @@
       return;
     }
     const ticket = ++revision;
-    busy = true;
+    setSourceBusy(true);
     retry.hidden = true;
     setNotice('loading');
-    select.disabled = true;
     try {
       const metadata = await request('tracks');
       if (disposed || ticket !== revision) return;
@@ -599,7 +697,8 @@
       else setText(title, 'Тренировка аудирования');
       while (select.options.length > 2) select.remove(2);
       for (const track of metadata.tracks) option(String(track.index), track.label);
-      if (sourceSelection === 'file') option('file', sourceLabel);
+      if (![...select.options].some((item) => item.value === sourceSelection))
+        option(sourceSelection, sourceLabel);
       const result = await request(
         desired === 'transcript' ? 'transcript' : 'load',
         /^\d+$/.test(desired) ? Number(desired) : null,
@@ -610,7 +709,7 @@
         : exercise.normalizeCues(result.cues ?? []);
       if (!cues.length)
         throw new Error('В этой дорожке нет слов для тренировки. Выберите другой источник.');
-      commit(cues, result.source, desired, result.approximate);
+      await commit(cues, result.source, desired, result.approximate);
     } catch (error) {
       if (disposed || ticket !== revision) return;
       failedSelection = desired;
@@ -618,10 +717,7 @@
       setNotice('error', error.message);
       retry.hidden = false;
     } finally {
-      if (!disposed && ticket === revision) {
-        busy = false;
-        select.disabled = Boolean(review);
-      }
+      if (!disposed && ticket === revision) setSourceBusy(false);
     }
   }
   function renderCue(task, index) {
@@ -717,8 +813,11 @@
       saveNow();
       return;
     }
+    const previousTask = { ...task };
     task.status = forcedStatus ?? (task.hints ? 'assisted' : 'correct');
     task.value = task.answer;
+    if (!review)
+      wordProfile = exercise.updateWordProfile(wordProfile, [previousTask], [task], Date.now());
     paintRow(task, row);
     updateStats();
     saveNow();
@@ -880,9 +979,9 @@
       hints: 0,
     }));
     reviewBar.hidden = false;
-    select.disabled = true;
-    importButton.disabled = true;
+    setSourceBusy(busy);
     difficulty.disabled = true;
+    gapFrequency.disabled = true;
     draw();
     repeatCue(0);
   }
@@ -909,9 +1008,9 @@
     lastPosition = previous.position;
     previousTime = captionTime();
     reviewBar.hidden = true;
-    select.disabled = busy;
-    importButton.disabled = false;
+    setSourceBusy(busy);
     difficulty.disabled = false;
+    gapFrequency.disabled = false;
     setNotice('source');
     draw();
     saveNow();

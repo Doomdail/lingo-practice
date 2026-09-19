@@ -5,29 +5,39 @@ const path = require('node:path');
 const os = require('node:os');
 const { chromium } = require('playwright');
 const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirname, '..'));
+const learningScenario = process.argv.includes('--learning');
+const hasLibraryRuntime = ['library.html', 'library.js', 'library.css'].every((name) =>
+  fs.existsSync(path.join(root, name)),
+);
 
 (async () => {
   assert.ok(fs.existsSync(path.join(root, 'manifest.json')), 'installable extension exists');
   const installed = fs.mkdtempSync(path.join(os.tmpdir(), 'lingo-extension-'));
+  const copyRuntime = (name, optional = false) => {
+    const source = path.join(root, name);
+    if (optional && !fs.existsSync(source)) return;
+    fs.mkdirSync(path.dirname(path.join(installed, name)), { recursive: true });
+    fs.copyFileSync(source, path.join(installed, name));
+  };
   for (const name of [
     'manifest.json',
     'background.js',
     'youtube.js',
     'exercise.js',
+    'data.js',
     'content.js',
     'styles.css',
-  ])
-    fs.copyFileSync(path.join(root, name), path.join(installed, name));
-  for (const name of [
     'i18n.js',
+  ])
+    copyRuntime(name);
+  // Task 5 lands in a parallel worktree; include its runtime closure as soon as it is rebased here.
+  for (const name of ['library.html', 'library.js', 'library.css']) copyRuntime(name, true);
+  for (const name of [
     '_locales/en/messages.json',
     '_locales/ru/messages.json',
     ...['16', '32', '48', '128'].map((size) => `icons/icon${size}.png`),
   ])
-    if (fs.existsSync(path.join(root, name))) {
-      fs.mkdirSync(path.dirname(path.join(installed, name)), { recursive: true });
-      fs.copyFileSync(path.join(root, name), path.join(installed, name));
-    }
+    copyRuntime(name, true);
   // The test cannot click Chrome's toolbar. Grant the same host access as a real action click, in this temporary copy only.
   const manifest = JSON.parse(fs.readFileSync(path.join(installed, 'manifest.json'), 'utf8'));
   manifest.host_permissions = ['https://www.youtube.com/*'];
@@ -48,10 +58,28 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
     const worker = context.serviceWorkers()[0] || (await context.waitForEvent('serviceworker'));
     let page = await context.newPage();
     const activate = () =>
-      worker.evaluate(async () => {
-        const tabs = await chrome.tabs.query({ url: 'https://www.youtube.com/watch*' });
-        await toggleTab(tabs.at(-1));
-      });
+      worker.evaluate(
+        async ({ fixedRandom, stubOptions }) => {
+          const tabs = await chrome.tabs.query({ url: 'https://www.youtube.com/watch*' });
+          if (fixedRandom !== null || stubOptions)
+            await chrome.scripting.executeScript({
+              target: { tabId: tabs.at(-1).id },
+              func: (value, replaceOptions) => {
+                if (value !== null) Math.random = () => value;
+                if (replaceOptions)
+                  chrome.runtime.openOptionsPage = async () => {
+                    document.documentElement.dataset.lingoLibraryOpened = 'true';
+                  };
+              },
+              args: [fixedRandom, stubOptions],
+            });
+          await toggleTab(tabs.at(-1));
+        },
+        {
+          fixedRandom: learningScenario ? 0.4 : null,
+          stubOptions: learningScenario && !hasLibraryRuntime,
+        },
+      );
     const liveArg = process.argv.find((arg) => arg.startsWith('--live='));
     if (liveArg) {
       await page.addInitScript(() => {
@@ -157,7 +185,17 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
         { tStartMs: 4000, dDurationMs: 4000, segs: [{ utf8: 'Hello, friend!' }] },
         { tStartMs: 8000, dDurationMs: 4000, segs: [{ utf8: "Don't stop believing." }] },
         { tStartMs: 12000, dDurationMs: 4000, segs: [{ utf8: 'Learning a little every day.' }] },
-        { tStartMs: 16000, dDurationMs: 4000, segs: [{ utf8: 'Listen closely and try again.' }] },
+        {
+          tStartMs: 16000,
+          dDurationMs: 4000,
+          segs: [
+            {
+              utf8: process.argv.includes('--learning')
+                ? 'Hello, friend!'
+                : 'Listen closely and try again.',
+            },
+          ],
+        },
       ],
     };
     let emptyCaptions = false;
@@ -206,10 +244,419 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
     );
     await page.goto('https://www.youtube.com/watch?v=fixture01');
     await page.waitForFunction(() => document.querySelector('video').readyState >= 2);
+    if (learningScenario)
+      await worker.evaluate(() => chrome.storage.local.set({ storageEpoch: 7 }));
     await activate();
     await page.locator('#lingo-practice-root').waitFor();
     let inputs = page.locator('#lingo-practice-root input[data-cue]');
     await inputs.first().waitFor();
+    if (process.argv.includes('--learning')) {
+      await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+      assert.deepEqual(await page.getByLabel('Сложность').locator('option').allTextContents(), [
+        'Лёгкая',
+        'Обычная',
+        'Сложная',
+        'Адаптивная',
+      ]);
+      assert.deepEqual(
+        await page.getByLabel('Частота пропусков').locator('option').allTextContents(),
+        ['Часто', 'Обычно', 'Редко'],
+      );
+      assert.equal(
+        await page.getByRole('button', { name: 'Мои занятия', exact: true }).count(),
+        1,
+        'settings expose the local lesson library',
+      );
+      await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
+      const denseAnswerCount = await inputs.count();
+      assert.equal(denseAnswerCount, 5);
+      assert.equal(
+        await page.locator('[data-cue-row="1"] .sentence').evaluate((node) => node.firstChild.data),
+        '',
+        'the deterministic balanced fixture initially hides Hello',
+      );
+      await inputs.nth(1).fill('Hello');
+      await inputs.nth(1).press('Enter');
+      await page.getByText('Верно', { exact: true }).waitFor();
+      await inputs.nth(2).fill('draft');
+      const startedBefore = await page.locator('[data-cue-row="2"]').evaluate((node) => ({
+        text: node.textContent,
+        value: node.querySelector('input').value,
+      }));
+      await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+      await page.getByLabel('Сложность').selectOption('adaptive');
+      assert.equal(
+        await page.locator('[data-cue-row="4"] .sentence').evaluate((node) => node.firstChild.data),
+        'Hello, ',
+        'the in-memory clean answer profile changes a later adaptive gap',
+      );
+      await page.getByLabel('Частота пропусков').selectOption('sparse');
+      await page.getByText('Сохранено на устройстве', { exact: true }).waitFor({ timeout: 3000 });
+      const sparseAnswerCount = await inputs.count();
+      assert.ok(sparseAnswerCount < denseAnswerCount, 'sparse frequency removes untouched gaps');
+      assert.deepEqual(
+        await page.locator('[data-cue-row="2"]').evaluate((node) => ({
+          text: node.textContent,
+          value: node.querySelector('input').value,
+        })),
+        startedBefore,
+        'difficulty and frequency preserve a started task byte-for-byte',
+      );
+      await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
+      await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+      await activate();
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().waitFor();
+      assert.equal(
+        await inputs.count(),
+        sparseAnswerCount,
+        'restoring a session keeps exact task gaps',
+      );
+      assert.equal(await page.locator('[data-cue-row="2"] input').inputValue(), 'draft');
+      await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+      assert.equal(await page.getByLabel('Сложность').inputValue(), 'adaptive');
+      assert.equal(await page.getByLabel('Частота пропусков').inputValue(), 'sparse');
+      await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
+
+      const sourceSelect = page.getByLabel('Источник субтитров', { exact: true });
+      const importInput = page.getByLabel('Файл субтитров');
+      const importButton = page.getByRole('button', { name: 'Открыть SRT/VTT', exact: true });
+      const sourceDialog = page.getByRole('dialog', { name: 'Сменить источник субтитров?' });
+      const lessonSnapshot = () =>
+        page.locator('.cue').evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            className: node.className,
+            text: node.textContent,
+            value: node.querySelector('input')?.value ?? null,
+            disabled: node.querySelector('input')?.disabled ?? null,
+          })),
+        );
+      let candidate = 0;
+      const uploadCandidate = async (word) => {
+        const name = `candidate-${++candidate}.srt`;
+        await importInput.setInputFiles({
+          name,
+          mimeType: 'text/plain',
+          buffer: Buffer.from(`1\n00:00:01,000 --> 00:00:03,000\n${word}`),
+        });
+        return name;
+      };
+      const sourceState = () =>
+        sourceSelect.evaluate((node) => ({
+          value: node.value,
+          label: node.selectedOptions[0]?.textContent ?? null,
+        }));
+      const assertCancelPreserves = async (word, escape = false, narrow = false) => {
+        const before = await lessonSnapshot();
+        const selected = await sourceState();
+        await uploadCandidate(word);
+        await sourceDialog.waitFor({ timeout: 3000 });
+        if (narrow) {
+          await page.setViewportSize({ width: 320, height: 800 });
+          const layout = await sourceDialog.evaluate((dialog) => {
+            const [first, second] = dialog.querySelectorAll('.dialog-actions > button');
+            const firstBox = first.getBoundingClientRect();
+            const secondBox = second.getBoundingClientRect();
+            const dialogBox = dialog.getBoundingClientRect();
+            return {
+              fits:
+                dialog.scrollWidth <= dialog.clientWidth &&
+                dialogBox.left >= 0 &&
+                dialogBox.right <= innerWidth,
+              stacked: secondBox.top >= firstBox.bottom,
+            };
+          });
+          assert.deepEqual(layout, { fits: true, stacked: true });
+        }
+        if (escape) await page.keyboard.press('Escape');
+        else await sourceDialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+        await sourceDialog.waitFor({ state: 'hidden' });
+        if (narrow) await page.setViewportSize({ width: 1440, height: 1050 });
+        assert.deepEqual(await lessonSnapshot(), before);
+        assert.deepEqual(await sourceState(), selected);
+        assert.equal(
+          await importButton.evaluate((node) => node.getRootNode().activeElement === node),
+          true,
+          'source cancellation returns focus to the import button',
+        );
+      };
+      const confirmReplacement = async (word) => {
+        const name = await uploadCandidate(word);
+        await sourceDialog.waitFor({ timeout: 3000 });
+        await sourceDialog.getByRole('button', { name: 'Сменить субтитры', exact: true }).click();
+        await page.waitForFunction(
+          (label) =>
+            document.querySelector('#lingo-practice-root').shadowRoot.querySelector('.notice')
+              .textContent === label,
+          name,
+        );
+      };
+
+      const restoredBeforeBrokenImport = await lessonSnapshot();
+      await importInput.setInputFiles({
+        name: 'broken.vtt',
+        mimeType: 'text/vtt',
+        buffer: Buffer.from('broken file'),
+      });
+      await page.locator('.notice.error').waitFor();
+      assert.equal(await sourceDialog.count(), 0, 'invalid input never asks to replace the lesson');
+      assert.deepEqual(await lessonSnapshot(), restoredBeforeBrokenImport);
+      assert.equal(await page.locator('[data-cue-row="2"] input').inputValue(), 'draft');
+      await importInput.setInputFiles({
+        name: 'no-gaps.vtt',
+        mimeType: 'text/vtt',
+        buffer: Buffer.from('WEBVTT\n\n00:00.000 --> 00:02.000\nhttps://example.com'),
+      });
+      await page.waitForFunction(
+        (message) =>
+          document
+            .querySelector('#lingo-practice-root')
+            .shadowRoot.querySelector('.notice')
+            .textContent.startsWith(message),
+        'В субтитрах не найдено слов для пропусков.',
+      );
+      assert.equal(await sourceDialog.count(), 0, 'a parsed candidate without gaps never asks');
+      assert.deepEqual(await lessonSnapshot(), restoredBeforeBrokenImport);
+
+      await assertCancelPreserves('Alpha', false, true); // existing correct answer and draft
+      await confirmReplacement('Alpha');
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+
+      await inputs.first().fill('   ');
+      await assertCancelPreserves('Bravo', true); // whitespace-only draft and Escape
+      await confirmReplacement('Bravo');
+
+      await inputs.first().fill('wrong');
+      await inputs.first().press('Enter');
+      await page.getByText('Попробуй ещё раз', { exact: true }).waitFor();
+      await assertCancelPreserves('Charlie'); // mistake
+      await confirmReplacement('Charlie');
+
+      await page.locator('[data-cue-row="0"] [data-action="hint"]').click();
+      await page.getByText('Первая буква: C', { exact: true }).waitFor();
+      await assertCancelPreserves('Delta', true); // hint and Escape
+      await confirmReplacement('Delta');
+
+      await page.locator('[data-cue-row="0"] [data-action="skip"]').click();
+      await page.getByText('Пропущено', { exact: true }).waitFor();
+      await assertCancelPreserves('Echo'); // skipped
+      await confirmReplacement('Echo');
+
+      await inputs.first().fill('Echo');
+      await inputs.first().press('Enter');
+      await page.getByText('Верно', { exact: true }).waitFor();
+      await assertCancelPreserves('Foxtrot', true); // correct and Escape
+
+      await sourceSelect.selectOption('auto');
+      await sourceDialog.waitFor({ timeout: 3000 });
+      await sourceDialog.getByRole('button', { name: 'Сменить субтитры', exact: true }).click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector('#lingo-practice-root').shadowRoot.querySelector('.notice')
+            .textContent === 'English',
+      );
+      await sourceSelect.selectOption('0');
+      await page.waitForFunction(() => {
+        const source = document
+          .querySelector('#lingo-practice-root')
+          .shadowRoot.querySelector('[aria-label="Источник субтитров"]');
+        return source.value === '0' && !source.disabled;
+      });
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().fill('track-draft');
+      const beforeFailedFetch = await lessonSnapshot();
+      const selectedBeforeFailedFetch = await sourceState();
+      await page.evaluate(() => {
+        const player = document.querySelector('#movie_player');
+        window.task6OriginalPlayerResponse = player.getPlayerResponse;
+        player.getPlayerResponse = () => {
+          const response = window.task6OriginalPlayerResponse();
+          return {
+            ...response,
+            captions: { playerCaptionsTracklistRenderer: { captionTracks: [] } },
+          };
+        };
+      });
+      emptyCaptions = true;
+      await sourceSelect.selectOption('auto');
+      await page.getByRole('button', { name: 'Повторить загрузку', exact: true }).waitFor();
+      assert.equal(
+        await sourceDialog.count(),
+        0,
+        'failed caption fetch never asks for confirmation',
+      );
+      assert.deepEqual(await lessonSnapshot(), beforeFailedFetch);
+      assert.deepEqual(await sourceState(), selectedBeforeFailedFetch);
+      await page.evaluate(() => {
+        document.querySelector('#movie_player').getPlayerResponse =
+          window.task6OriginalPlayerResponse;
+        delete window.task6OriginalPlayerResponse;
+      });
+      emptyCaptions = false;
+      await page.getByRole('button', { name: 'Повторить загрузку', exact: true }).click();
+      await sourceDialog.waitFor({ timeout: 3000 });
+      await page.keyboard.press('Escape');
+      await sourceDialog.waitFor({ state: 'hidden' });
+      assert.deepEqual(await lessonSnapshot(), beforeFailedFetch);
+      assert.deepEqual(await sourceState(), selectedBeforeFailedFetch);
+      assert.equal(
+        await sourceSelect.evaluate((node) => node.getRootNode().activeElement === node),
+        true,
+        'track cancellation returns focus to the source select',
+      );
+
+      await confirmReplacement('Golf');
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().fill('wrong');
+      await inputs.first().press('Enter');
+      await page.getByText('Попробуй ещё раз', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Разбор ошибок', exact: true }).click();
+      await page.getByRole('button', { name: 'Повторить сложные места', exact: true }).click();
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().fill('Golf');
+      await inputs.first().press('Enter');
+      await page.getByText('Верно', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'К основной тренировке', exact: true }).click();
+      await confirmReplacement('Golf hotel');
+      assert.equal(
+        await page.locator('[data-cue-row="0"] .sentence').evaluate((node) => node.firstChild.data),
+        '',
+        'repeat review does not change the adaptive word profile',
+      );
+      await page.getByText('Сохранено на устройстве', { exact: true }).waitFor({ timeout: 3000 });
+      await worker.evaluate(() => {
+        const originalHandleLessonMessage = handleLessonMessage;
+        let releaseBlockedSave = () => {};
+        globalThis.task6SaveAttempts = 0;
+        globalThis.task6BlockedSaveStarted = false;
+        globalThis.task6ReleaseBlockedSave = () => releaseBlockedSave();
+        handleLessonMessage = async (message) => {
+          if (message.action === 'save') {
+            globalThis.task6SaveAttempts++;
+            if (
+              !globalThis.task6BlockedSaveStarted &&
+              message.session?.tasks.some((task) => task.value === 'barrier-draft')
+            ) {
+              globalThis.task6BlockedSaveStarted = true;
+              await new Promise((resolve) => {
+                releaseBlockedSave = resolve;
+              });
+            }
+          }
+          return originalHandleLessonMessage(message);
+        };
+      });
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().fill('barrier-draft');
+      await worker.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const deadline = Date.now() + 3000;
+            const poll = () => {
+              if (globalThis.task6BlockedSaveStarted) resolve();
+              else if (Date.now() >= deadline) reject(new Error('save did not reach worker'));
+              else setTimeout(poll, 10);
+            };
+            poll();
+          }),
+      );
+      await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+      const pagesBeforeLibrary = context.pages().length;
+      const libraryPagePromise = hasLibraryRuntime ? context.waitForEvent('page') : null;
+      await page.getByRole('button', { name: 'Мои занятия', exact: true }).click();
+      await page.waitForTimeout(100);
+      assert.equal(
+        await page.locator('.settings-dialog').evaluate((node) => node.open),
+        true,
+        'library waits for the pending lesson save',
+      );
+      assert.equal(context.pages().length, pagesBeforeLibrary);
+      assert.equal(
+        await page.evaluate(() => document.documentElement.dataset.lingoLibraryOpened),
+        undefined,
+      );
+      await worker.evaluate(() => globalThis.task6ReleaseBlockedSave());
+      let libraryPage = null;
+      if (hasLibraryRuntime) {
+        libraryPage = await libraryPagePromise;
+        await libraryPage.waitForLoadState('domcontentloaded');
+        const listing = await libraryPage.evaluate(() =>
+          chrome.runtime.sendMessage({ type: 'LINGO_LIBRARY', action: 'list' }),
+        );
+        assert.equal(
+          listing.lessons.some((lesson) => lesson.videoId === 'fixture01'),
+          true,
+        );
+      } else {
+        await page.waitForFunction(
+          () => document.documentElement.dataset.lingoLibraryOpened === 'true',
+        );
+      }
+      assert.equal(
+        await worker.evaluate(async () => {
+          await storageQueue;
+          return (await chrome.storage.local.get('lesson:fixture01'))['lesson:fixture01'].tasks[0]
+            .value;
+        }),
+        'barrier-draft',
+        'the draft is committed before the library opens',
+      );
+      await libraryPage?.close();
+
+      const attemptsBeforeConflict = await worker.evaluate(() => globalThis.task6SaveAttempts);
+      await worker.evaluate(async () => {
+        const { storageEpoch } = await chrome.storage.local.get('storageEpoch');
+        await chrome.storage.local.set({ storageEpoch: storageEpoch + 1 });
+      });
+      await inputs.first().fill('stale-draft');
+      await page
+        .getByText(
+          'Хранилище изменено. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.',
+          { exact: true },
+        )
+        .waitFor({ timeout: 3000 });
+      const attemptsAfterConflict = await worker.evaluate(() => globalThis.task6SaveAttempts);
+      assert.ok(attemptsAfterConflict > attemptsBeforeConflict);
+      await inputs.first().fill('stale-again');
+      await page.waitForTimeout(150);
+      assert.equal(
+        await worker.evaluate(() => globalThis.task6SaveAttempts),
+        attemptsAfterConflict,
+        'an epoch conflict permanently stops saves from this open lesson',
+      );
+      assert.equal(
+        await worker.evaluate(async () => {
+          await storageQueue;
+          return (await chrome.storage.local.get('lesson:fixture01'))['lesson:fixture01'].tasks[0]
+            .value;
+        }),
+        'barrier-draft',
+        'the stale lesson never adopts the conflicting epoch',
+      );
+
+      await uploadCandidate('Hotel');
+      await sourceDialog.waitFor({ timeout: 3000 });
+      await page.evaluate(() => {
+        window.task6ClosingFileInput = document
+          .querySelector('#lingo-practice-root')
+          .shadowRoot.querySelector('input[type=file]');
+      });
+      await activate();
+      await page.locator('#lingo-practice-root').waitFor({ state: 'detached' });
+      await page.waitForFunction(() => window.task6ClosingFileInput.value === '', null, {
+        timeout: 3000,
+      });
+      await activate();
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().waitFor();
+      assert.equal(await inputs.first().inputValue(), 'barrier-draft');
+      await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+      assert.deepEqual(errors, []);
+      console.log(
+        'PASS: adaptive learning, source protection, save barrier and terminal epoch handling',
+      );
+      return;
+    }
     if (process.argv.includes('--i18n')) {
       await page.getByRole('button', { name: 'Settings', exact: true }).waitFor({ timeout: 1500 });
       assert.equal(await page.locator('#lingo-practice-root').getAttribute('lang'), 'en');
@@ -219,6 +666,18 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
       await inputs.nth(1).fill('draft');
       await page.evaluate(() => window.fixtureClock(6));
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      assert.deepEqual(await page.getByLabel('Difficulty').locator('option').allTextContents(), [
+        'Easy',
+        'Balanced',
+        'Hard',
+        'Adaptive',
+      ]);
+      assert.deepEqual(await page.getByLabel('Gap frequency').locator('option').allTextContents(), [
+        'Often',
+        'Normal',
+        'Rarely',
+      ]);
+      await page.getByRole('button', { name: 'My lessons', exact: true }).waitFor();
       await page.getByLabel('Interface language').selectOption('ru');
       await page.getByText('Подстрой под себя', { exact: true }).waitFor();
       assert.equal(await page.locator('#lingo-practice-root').getAttribute('lang'), 'ru');
@@ -241,6 +700,15 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
         'language changes preserve adjusted timestamps',
       );
       await page.screenshot({ path: path.join(root, 'output/playwright/lesson-en-0.3.png') });
+      await page.locator('input[type=file]').setInputFiles({
+        name: 'replacement.srt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('1\n00:00:01,000 --> 00:00:03,000\nReplacement'),
+      });
+      const sourceDialog = page.getByRole('dialog', { name: 'Change subtitle source?' });
+      await sourceDialog.waitFor();
+      assert.equal(/[А-Яа-яЁё]/u.test(await sourceDialog.innerText()), false);
+      await sourceDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
       await page.locator('input[type=file]').setInputFiles({
         name: 'broken.srt',
         mimeType: 'text/plain',
@@ -359,6 +827,11 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
       });
       await page.locator('.notice.error').waitFor();
       assert.equal(await inputs.count(), 5, 'invalid imports preserve the lesson');
+      const approveSourceChange = async () => {
+        const dialog = page.getByRole('dialog', { name: 'Сменить источник субтитров?' });
+        await dialog.waitFor();
+        await dialog.getByRole('button', { name: 'Сменить субтитры', exact: true }).click();
+      };
       const srt =
         '1\n00:00:01,000 --> 00:00:03,000\nAlpha\n\n2\n00:00:05,000 --> 00:00:07,000\nBravo\n\n3\n00:00:08,000 --> 00:00:10,000\nCharlie';
       await upload.setInputFiles({
@@ -366,6 +839,7 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
         mimeType: 'text/plain',
         buffer: Buffer.from(srt),
       });
+      await approveSourceChange();
       await page.waitForFunction(
         () =>
           document
@@ -423,6 +897,13 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
             .querySelector('#lingo-practice-root')
             .shadowRoot.querySelectorAll('input[data-cue]').length === 2,
       );
+      assert.equal(await page.getByLabel('Источник субтитров', { exact: true }).isDisabled(), true);
+      assert.equal(
+        await page.getByRole('button', { name: 'Открыть SRT/VTT', exact: true }).isDisabled(),
+        true,
+      );
+      assert.equal(await page.getByLabel('Сложность').isDisabled(), true);
+      assert.equal(await page.getByLabel('Частота пропусков').isDisabled(), true);
       await page.setViewportSize({ width: 780, height: 800 });
       await page.getByRole('button', { name: 'Настройки', exact: true }).click();
       await page.getByLabel('Размер видео').selectOption('large');
@@ -458,6 +939,13 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
         .waitFor({ timeout: 3000 });
       assert.equal(await page.evaluate(() => document.querySelector('video').paused), true);
       await page.getByRole('button', { name: 'К основной тренировке', exact: true }).click();
+      assert.equal(await page.getByLabel('Источник субтитров', { exact: true }).isEnabled(), true);
+      assert.equal(
+        await page.getByRole('button', { name: 'Открыть SRT/VTT', exact: true }).isEnabled(),
+        true,
+      );
+      assert.equal(await page.getByLabel('Сложность').isEnabled(), true);
+      assert.equal(await page.getByLabel('Частота пропусков').isEnabled(), true);
       assert.equal(await inputs.count(), 3);
       assert.equal(await inputs.nth(2).inputValue(), 'Char');
       await page.locator('[data-cue-row="1"]').getByText('Показано', { exact: true }).waitFor();
@@ -471,6 +959,7 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
           'WEBVTT\n\n00:00.000 --> 00:02.000\n<img src=x onerror="window.importExecuted=true">caf&eacute;',
         ),
       });
+      await approveSourceChange();
       await page.waitForFunction(
         () =>
           document
@@ -490,7 +979,10 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
       );
       assert.equal(await page.locator('#lingo-practice-root img').count(), 0);
       assert.equal(
-        await page.getByLabel('Источник субтитров').locator('option:checked').innerText(),
+        await page
+          .getByLabel('Источник субтитров', { exact: true })
+          .locator('option:checked')
+          .innerText(),
         'entities.vtt',
         'a second import updates the selected filename',
       );
@@ -499,6 +991,7 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
         mimeType: 'text/plain',
         buffer: Buffer.from('1\n00:00:21,000 --> 00:00:30,000\nOmega'),
       });
+      await approveSourceChange();
       await page.waitForFunction(
         () =>
           document.querySelector('#lingo-practice-root').shadowRoot.querySelector('.notice')
@@ -706,7 +1199,7 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
       'modern native transcript is the fallback for empty timedtext',
     );
     assert.match(await page.locator('.notice').innerText(), /округлено/);
-    await page.getByLabel('Источник субтитров').selectOption('0');
+    await page.getByLabel('Источник субтитров', { exact: true }).selectOption('0');
     await page.getByRole('button', { name: 'Повторить загрузку', exact: true }).waitFor();
     assert.equal(
       await inputs.count(),
@@ -714,7 +1207,7 @@ const root = path.resolve(process.env.LINGO_EXTENSION_ROOT || path.join(__dirnam
       'a failed explicit language change preserves the current lesson',
     );
     assert.equal(
-      await page.getByLabel('Источник субтитров').inputValue(),
+      await page.getByLabel('Источник субтитров', { exact: true }).inputValue(),
       'auto',
       'failed track selection rolls back to the existing source',
     );

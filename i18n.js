@@ -111,6 +111,11 @@
     Лёгкая: 'Easy',
     Обычная: 'Balanced',
     Сложная: 'Hard',
+    Адаптивная: 'Adaptive',
+    'Частота пропусков': 'Gap frequency',
+    Часто: 'Often',
+    Обычно: 'Normal',
+    Редко: 'Rarely',
     'Размер видео': 'Video size',
     Компактное: 'Compact',
     Среднее: 'Medium',
@@ -152,6 +157,10 @@
     'Закрыть разбор': 'Close review',
     'Повтор завершён. Основная оценка сохранена.':
       'Review complete. Your main result is unchanged.',
+    'Сменить источник субтитров?': 'Change subtitle source?',
+    'Смена субтитров начнёт новую тренировку и удалит текущие ответы, ошибки и подсказки для этого видео.':
+      'Changing subtitles will start a new practice session and remove the current answers, mistakes and hints for this video.',
+    'Сменить субтитры': 'Change subtitles',
     'Реклама · задания приостановлены. ': 'Ad · practice is paused. ',
     ' · автоматические': ' · auto-generated',
     'Расшифровка YouTube · текущий язык': 'YouTube transcript · current language',
@@ -181,6 +190,8 @@
     'Файл слишком большой: максимум 2 МБ.': 'The file is too large: the limit is 2 MB.',
     'В этой дорожке нет слов для тренировки. Выберите другой источник.':
       'This track has no words to practice. Choose another source.',
+    'В субтитрах не найдено слов для пропусков.':
+      'No words were found in the subtitles to create gaps.',
     'Некорректный таймкод в файле субтитров.': 'Invalid timestamp in the subtitle file.',
     'Не удалось прочитать SRT/VTT: проверьте формат файла.':
       'Could not read SRT/VTT: check the file format.',
@@ -193,6 +204,8 @@
       'The file has no spoken subtitles to practice.',
     'Тренировка изменена в другой вкладке. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.':
       'Practice was changed in another tab. Close and reopen practice to load the latest progress.',
+    'Хранилище изменено. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.':
+      'Storage changed. Close and reopen practice to load the latest progress.',
     'Не удалось сохранить или прочитать прогресс. Проверьте разрешение «storage» и свободное место в хранилище расширения.':
       'Could not save or read progress. Check the storage permission and the available space in extension storage.',
     'Проигрыватель не ответил. Повторите загрузку.':

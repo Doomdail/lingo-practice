@@ -174,6 +174,34 @@ test('dynamic translations retain every named placeholder in both languages', ()
   }
 });
 
+test('learning controls, source confirmation and stale-storage copy have English parity', () => {
+  const { text } = api();
+  const messages = [
+    'Адаптивная',
+    'Частота пропусков',
+    'Часто',
+    'Обычно',
+    'Редко',
+    'Мои занятия',
+    'Сменить источник субтитров?',
+    'Смена субтитров начнёт новую тренировку и удалит текущие ответы, ошибки и подсказки для этого видео.',
+    'Отмена',
+    'Сменить субтитры',
+    'В субтитрах не найдено слов для пропусков.',
+    'Тренировка изменена в другой вкладке. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.',
+    'Хранилище изменено. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.',
+  ];
+  const placeholders = (value) => [...value.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
+  for (const message of messages) {
+    const english = text(message, {}, 'en');
+    assert.doesNotMatch(english, /[А-Яа-яЁё]/u, `missing English copy: ${message}`);
+    assert.deepEqual(placeholders(english), placeholders(text(message, {}, 'ru')), message);
+  }
+  assert.equal(text('Адаптивная', {}, 'en'), 'Adaptive');
+  assert.equal(text('Отмена', {}, 'en'), 'Cancel');
+  assert.equal(text('Сменить субтитры', {}, 'en'), 'Change subtitles');
+});
+
 test('browser script uses navigator language without requiring CommonJS', () => {
   const source = fs.readFileSync(modulePath, 'utf8');
   for (const [language, expected] of [
