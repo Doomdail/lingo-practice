@@ -103,6 +103,9 @@ const hasLibraryRuntime = ['library.html', 'library.js', 'library.css'].every((n
         {},
         { timeout: 20000 },
       );
+      await worker.evaluate(() =>
+        chrome.storage.local.set({ preferences: { onboardingSeen: true } }),
+      );
       await activate();
       const answers = page.locator('#lingo-practice-root input[data-cue]');
       try {
@@ -244,13 +247,409 @@ const hasLibraryRuntime = ['library.html', 'library.js', 'library.css'].every((n
     );
     await page.goto('https://www.youtube.com/watch?v=fixture01');
     await page.waitForFunction(() => document.querySelector('video').readyState >= 2);
-    if (learningScenario)
-      await worker.evaluate(() => chrome.storage.local.set({ storageEpoch: 7 }));
+    await worker.evaluate(async (learning) => {
+      const update = { preferences: { onboardingSeen: true } };
+      if (learning) update.storageEpoch = 7;
+      await chrome.storage.local.set(update);
+    }, learningScenario);
     await activate();
     await page.locator('#lingo-practice-root').waitFor();
     let inputs = page.locator('#lingo-practice-root input[data-cue]');
     await inputs.first().waitFor();
     if (process.argv.includes('--learning')) {
+      const resetAutoResumeLesson = async () => {
+        await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+        await worker.evaluate(async () => {
+          await storageQueue;
+          await chrome.storage.local.remove('lesson:fixture01');
+          await chrome.storage.local.set({
+            preferences: { onboardingSeen: true, autoPause: true },
+            storageEpoch: 7,
+          });
+        });
+        await page.evaluate(() => {
+          const video = document.querySelector('video');
+          video.pause();
+          video.currentTime = 3.7;
+        });
+        await page.waitForFunction(() => !document.querySelector('video').seeking);
+        await activate();
+        inputs = page.locator('#lingo-practice-root input[data-cue]');
+        await inputs.first().waitFor();
+      };
+      const forceExtensionAnswerPause = async () => {
+        await page.evaluate(() => {
+          const video = document.querySelector('video');
+          video.pause();
+          video.currentTime = 3.7;
+        });
+        await page.waitForFunction(() => !document.querySelector('video').seeking);
+        await page.getByRole('button', { name: 'Продолжить', exact: true }).click();
+        await page.waitForFunction(
+          () => {
+            const video = document.querySelector('video');
+            return video.paused && video.currentTime >= 4 && video.currentTime < 5;
+          },
+          {},
+          { timeout: 3000 },
+        );
+      };
+      const answerCases = [
+        [
+          'clean correct',
+          async () => {
+            await inputs.first().fill('keyboard');
+            await inputs.first().press('Enter');
+          },
+          true,
+        ],
+        [
+          'assisted correct',
+          async () => {
+            await inputs.first().fill('keyboard');
+            await inputs.first().press('Enter');
+          },
+          true,
+          async () => page.locator('[data-cue-row="0"] [data-action="hint"]').click(),
+        ],
+        [
+          'wrong',
+          async () => {
+            await inputs.first().fill('wrong');
+            await inputs.first().press('Enter');
+          },
+          false,
+        ],
+        [
+          'skip',
+          async () => page.locator('[data-cue-row="0"] [data-action="skip"]').click(),
+          false,
+        ],
+        [
+          'reveal',
+          async () => page.locator('[data-cue-row="0"] [data-action="hint"]').click(),
+          false,
+          async () => {
+            const hint = page.locator('[data-cue-row="0"] [data-action="hint"]');
+            await hint.click();
+            await hint.click();
+          },
+        ],
+      ];
+      for (const [name, act, shouldPlay, prepare] of answerCases) {
+        await resetAutoResumeLesson();
+        await prepare?.();
+        await forceExtensionAnswerPause();
+        await act();
+        if (shouldPlay)
+          await page.waitForFunction(
+            () => !document.querySelector('video').paused,
+            {},
+            {
+              timeout: 1500,
+            },
+          );
+        else await page.waitForTimeout(150);
+        assert.equal(
+          await page.locator('video').evaluate((video) => !video.paused),
+          shouldPlay,
+          name,
+        );
+      }
+
+      const answerFirst = async () => {
+        await inputs.first().fill('keyboard');
+        await inputs.first().press('Enter');
+        await page.waitForTimeout(150);
+      };
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.getByRole('button', { name: 'Продолжить', exact: true }).click();
+      await page.waitForFunction(() => !document.querySelector('video').paused);
+      await page.getByRole('button', { name: 'Пауза', exact: true }).click();
+      await answerFirst();
+      assert.equal(
+        await page.locator('video').evaluate((video) => video.paused),
+        true,
+        'manual pause',
+      );
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.evaluate(() => {
+        document.querySelector('video').currentTime = 2;
+      });
+      await page.waitForFunction(() => !document.querySelector('video').seeking);
+      await answerFirst();
+      assert.equal(await page.locator('video').evaluate((video) => video.paused), true, 'seek');
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.getByLabel('Пауза в конце строки').uncheck();
+      await answerFirst();
+      assert.equal(
+        await page.locator('video').evaluate((video) => video.paused),
+        true,
+        'disabled auto-pause',
+      );
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.evaluate(() => {
+        const player = document.querySelector('#movie_player');
+        player.classList.add('ad-showing');
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
+      await page.locator('.shell.ad-playing').waitFor();
+      await page.evaluate(() => {
+        const player = document.querySelector('#movie_player');
+        player.classList.remove('ad-showing');
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
+      await page.locator('.shell.ad-playing').waitFor({ state: 'hidden' });
+      await answerFirst();
+      assert.equal(
+        await page.locator('video').evaluate((video) => video.paused),
+        true,
+        'ad transition',
+      );
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.evaluate(() => {
+        const video = document.querySelector('video');
+        video.currentTime = video.duration;
+      });
+      await page.waitForFunction(() => document.querySelector('video').ended);
+      await answerFirst();
+      assert.equal(
+        await page.locator('video').evaluate((video) => video.paused),
+        true,
+        'ended video',
+      );
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.locator('[data-cue-row="0"] .timestamp').click();
+      await page.waitForFunction(() => !document.querySelector('video').paused);
+      await page.getByRole('button', { name: 'Пауза', exact: true }).click();
+      await answerFirst();
+      assert.equal(await page.locator('video').evaluate((video) => video.paused), true, 'repeat');
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+      await page.getByLabel('Сложность').selectOption('hard');
+      await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
+      await answerFirst();
+      assert.equal(await page.locator('video').evaluate((video) => video.paused), true, 'rebuild');
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.locator('input[type=file]').setInputFiles({
+        name: 'pause-gate-replacement.srt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('1\n00:00:01,000 --> 00:00:03,000\nReplacement'),
+      });
+      await page
+        .locator('.notice')
+        .getByText('pause-gate-replacement.srt', { exact: true })
+        .waitFor();
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().fill('Replacement');
+      await inputs.first().press('Enter');
+      await page.waitForTimeout(150);
+      assert.equal(await page.locator('video').evaluate((video) => video.paused), true, 'commit');
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await page.evaluate(() => {
+        const old = document.querySelector('video');
+        const replacement = old.cloneNode(true);
+        replacement.dataset.task7Replacement = 'true';
+        document
+          .querySelector('#lingo-practice-root')
+          .shadowRoot.querySelector('.toolbar .primary').textContent = 'binding';
+        old.replaceWith(replacement);
+      });
+      await page.waitForFunction(
+        () => {
+          const video = document.querySelector('video[data-task7-replacement="true"]');
+          video?.dispatchEvent(new Event('pause'));
+          return (
+            document
+              .querySelector('#lingo-practice-root')
+              .shadowRoot.querySelector('.toolbar .primary').textContent === 'Продолжить'
+          );
+        },
+        {},
+        { timeout: 3000 },
+      );
+      await answerFirst();
+      assert.equal(
+        await page.locator('video').evaluate((video) => video.paused),
+        true,
+        'player replacement',
+      );
+
+      await resetAutoResumeLesson();
+      await forceExtensionAnswerPause();
+      await inputs.first().fill('wrong');
+      await inputs.first().press('Enter');
+      await page.getByRole('button', { name: 'Разбор ошибок', exact: true }).click();
+      await page.getByRole('button', { name: 'Повторить сложные места', exact: true }).click();
+      await page.waitForFunction(
+        () => {
+          const video = document.querySelector('video');
+          return video.paused && video.currentTime >= 4;
+        },
+        {},
+        { timeout: 6000 },
+      );
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().fill('keyboard');
+      await inputs.first().press('Enter');
+      await page
+        .getByText('Повтор завершён. Основная оценка сохранена.', { exact: true })
+        .waitFor();
+      assert.equal(await page.locator('video').evaluate((video) => video.paused), true, 'review');
+      await page.getByRole('button', { name: 'К основной тренировке', exact: true }).click();
+
+      await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+      await worker.evaluate(async () => {
+        await storageQueue;
+        await chrome.storage.local.clear();
+      });
+      emptyCaptions = true;
+      await activate();
+      await page.getByRole('button', { name: 'Повторить загрузку', exact: true }).waitFor();
+      const onboarding = page.getByRole('dialog', { name: 'Как заниматься' });
+      assert.equal(await onboarding.count(), 0, 'a failed load does not show first-run help');
+      emptyCaptions = false;
+      await page.getByRole('button', { name: 'Повторить загрузку', exact: true }).click();
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().waitFor();
+      await onboarding.waitFor();
+      assert.deepEqual(await onboarding.locator('li').allTextContents(), [
+        'Выберите дорожку или импортируйте SRT/VTT.',
+        'Слушайте, вписывайте слово и нажимайте Enter.',
+        'Используйте повтор и подсказки; прогресс сохраняется автоматически.',
+      ]);
+      await onboarding.press('Escape');
+      await onboarding.waitFor({ state: 'hidden' });
+      assert.equal(
+        await worker.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const deadline = Date.now() + 3000;
+              const poll = async () => {
+                const { preferences } = await chrome.storage.local.get('preferences');
+                if (preferences?.onboardingSeen) resolve(true);
+                else if (Date.now() >= deadline)
+                  reject(new Error('onboarding preference not saved'));
+                else setTimeout(poll, 10);
+              };
+              poll();
+            }),
+        ),
+        true,
+      );
+      await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+      await activate();
+      inputs = page.locator('#lingo-practice-root input[data-cue]');
+      await inputs.first().waitFor();
+      assert.equal(await onboarding.count(), 0, 'onboarding is only automatic once');
+      const helpButton = page.getByRole('button', { name: 'Как заниматься', exact: true });
+      await helpButton.click();
+      await onboarding.waitFor();
+      await onboarding.press('Escape');
+      await onboarding.waitFor({ state: 'hidden' });
+      assert.equal(
+        await helpButton.evaluate((node) => node.getRootNode().activeElement === node),
+        true,
+        'help returns focus to its opener',
+      );
+
+      for (const selector of ['.save-status', '.notice', '.settings-message']) {
+        assert.equal(await page.locator(selector).getAttribute('role'), null, selector + ' role');
+        assert.equal(
+          await page.locator(selector).getAttribute('aria-live'),
+          null,
+          selector + ' aria-live',
+        );
+      }
+      const announcer = page.locator('.announcer');
+      assert.equal(await announcer.count(), 1);
+      assert.equal(await announcer.getAttribute('aria-live'), 'polite');
+      assert.equal(await announcer.getAttribute('aria-atomic'), 'true');
+      assert.equal(await page.locator('.review-bar span').getAttribute('aria-live'), 'polite');
+      assert.equal(await page.locator('.review-bar span').getAttribute('aria-atomic'), 'true');
+      const dialogSemantics = await page.locator('dialog').evaluateAll((dialogs) =>
+        dialogs.map((dialog) => {
+          const labelledBy = dialog.getAttribute('aria-labelledby');
+          const heading = labelledBy && dialog.querySelector('#' + CSS.escape(labelledBy));
+          return { labelledBy, tagName: heading?.tagName, text: heading?.textContent };
+        }),
+      );
+      assert.equal(new Set(dialogSemantics.map(({ labelledBy }) => labelledBy)).size, 4);
+      for (const dialog of dialogSemantics) {
+        assert.ok(dialog.labelledBy, 'dialog has aria-labelledby');
+        assert.equal(dialog.tagName, 'H2', dialog.text);
+      }
+      const answerLabel = await inputs.first().getAttribute('aria-label');
+      assert.match(answerLabel, /пропуск/i);
+      assert.doesNotMatch(answerLabel, /keyboard/i);
+      for (const timestamp of await page.locator('.timestamp').all())
+        assert.equal(
+          await timestamp.getAttribute('aria-label'),
+          `Повторить с ${await timestamp.innerText()}`,
+        );
+      await page.setViewportSize({ width: 320, height: 800 });
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth <= 320),
+        true,
+        'lesson reflows without horizontal document scrolling',
+      );
+      await page.setViewportSize({ width: 1440, height: 1050 });
+
+      await page.evaluate(() => {
+        const root = document.querySelector('#lingo-practice-root').shadowRoot;
+        const announcer = root.querySelector('.announcer');
+        window.task7Announcements = [];
+        new MutationObserver(() => {
+          if (announcer.textContent) window.task7Announcements.push(announcer.textContent);
+        }).observe(announcer, { childList: true, characterData: true, subtree: true });
+        document.querySelector('#movie_player').classList.add('ad-showing');
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
+      const adStatus = page.locator('.ad-status');
+      await adStatus.waitFor();
+      assert.equal((await adStatus.innerText()).trim(), 'Реклама · задания приостановлены.');
+      await page.waitForFunction(() => window.task7Announcements.length === 1);
+      await page.evaluate(() => {
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
+      await page.waitForTimeout(100);
+      assert.equal(await page.evaluate(() => window.task7Announcements.length), 1);
+      await page.evaluate(() => {
+        const player = document.querySelector('#movie_player');
+        player.classList.remove('ad-showing');
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
+      await adStatus.waitFor({ state: 'hidden' });
+      await page.evaluate(() => {
+        const player = document.querySelector('#movie_player');
+        player.classList.add('ad-showing');
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
+      await page.waitForFunction(() => window.task7Announcements.length === 2);
+      await page.evaluate(() => {
+        document.querySelector('#movie_player').classList.remove('ad-showing');
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
+      await adStatus.waitFor({ state: 'hidden' });
+
       await page.getByRole('button', { name: 'Настройки', exact: true }).click();
       assert.deepEqual(await page.getByLabel('Сложность').locator('option').allTextContents(), [
         'Лёгкая',
@@ -618,8 +1017,15 @@ const hasLibraryRuntime = ['library.html', 'library.js', 'library.css'].every((n
       await page.getByRole('button', { name: 'Настройки', exact: true }).click();
       await page.getByRole('button', { name: 'Мои занятия', exact: true }).click();
       await page
+        .locator('.settings-message')
         .getByText('Не удалось открыть «Мои занятия». Повторите попытку.', { exact: true })
         .waitFor({ timeout: 3000 });
+      await page.waitForFunction(
+        (message) =>
+          document.querySelector('#lingo-practice-root').shadowRoot.querySelector('.announcer')
+            .textContent === message,
+        'Не удалось открыть «Мои занятия». Повторите попытку.',
+      );
       assert.equal(
         await page.locator('.settings-dialog').evaluate((node) => node.open),
         true,
@@ -639,15 +1045,22 @@ const hasLibraryRuntime = ['library.html', 'library.js', 'library.css'].every((n
       const attemptsBeforeConflict = await worker.evaluate(() => globalThis.task6SaveAttempts);
       await worker.evaluate(async () => {
         const { storageEpoch } = await chrome.storage.local.get('storageEpoch');
-        await chrome.storage.local.set({ storageEpoch: storageEpoch + 1 });
+        await chrome.storage.local.set({ storageEpoch: (storageEpoch ?? 0) + 1 });
       });
       await inputs.first().fill('stale-draft');
       await page
-        .getByText(
-          'Хранилище изменено. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.',
-          { exact: true },
-        )
+        .locator('.save-status')
+        .filter({
+          hasText:
+            'Хранилище изменено. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.',
+        })
         .waitFor({ timeout: 3000 });
+      await page.waitForFunction(
+        (message) =>
+          document.querySelector('#lingo-practice-root').shadowRoot.querySelector('.announcer')
+            .textContent === message,
+        'Хранилище изменено. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.',
+      );
       const attemptsAfterConflict = await worker.evaluate(() => globalThis.task6SaveAttempts);
       assert.ok(attemptsAfterConflict > attemptsBeforeConflict);
       await inputs.first().fill('stale-again');
@@ -693,6 +1106,35 @@ const hasLibraryRuntime = ['library.html', 'library.js', 'library.css'].every((n
     if (process.argv.includes('--i18n')) {
       await page.getByRole('button', { name: 'Settings', exact: true }).waitFor({ timeout: 1500 });
       assert.equal(await page.locator('#lingo-practice-root').getAttribute('lang'), 'en');
+      const helpButton = page.getByRole('button', { name: 'How to practice', exact: true });
+      await helpButton.click();
+      const helpDialog = page.getByRole('dialog', { name: 'How to practice' });
+      await helpDialog.waitFor();
+      assert.deepEqual(await helpDialog.locator('li').allTextContents(), [
+        'Choose a subtitle track or import SRT/VTT.',
+        'Listen, fill in the word and press Enter.',
+        'Use replay and hints; progress is saved automatically.',
+      ]);
+      assert.equal(/[А-Яа-яЁё]/u.test(await helpDialog.innerText()), false);
+      await helpDialog.press('Escape');
+      assert.equal(
+        await helpButton.evaluate((node) => node.getRootNode().activeElement === node),
+        true,
+      );
+      assert.match(await inputs.first().getAttribute('aria-label'), /gap/i);
+      assert.doesNotMatch(await inputs.first().getAttribute('aria-label'), /keyboard/i);
+      await page.evaluate(() => {
+        document.querySelector('#movie_player').classList.add('ad-showing');
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
+      await page
+        .locator('.ad-status')
+        .getByText('Ad · practice is paused.', { exact: true })
+        .waitFor();
+      await page.evaluate(() => {
+        document.querySelector('#movie_player').classList.remove('ad-showing');
+        document.querySelector('video').dispatchEvent(new Event('timeupdate'));
+      });
       await inputs.first().fill('keyboard');
       await inputs.first().press('Enter');
       await page.getByText('Correct', { exact: true }).waitFor();

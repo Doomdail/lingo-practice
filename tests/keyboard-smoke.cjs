@@ -18,7 +18,8 @@ const copy = (from, to) => {
   for (const name of fs
     .readdirSync(original)
     .filter(
-      (name) => /\.(js|css)$/.test(name) || ['manifest.json', '_locales', 'icons'].includes(name),
+      (name) =>
+        /\.(js|css|html)$/.test(name) || ['manifest.json', '_locales', 'icons'].includes(name),
     )) {
     copy(path.join(original, name), path.join(installed, name));
   }
@@ -80,6 +81,7 @@ const copy = (from, to) => {
     await page.waitForFunction(() => document.querySelector('video').readyState >= 2);
     await worker.evaluate(async () => {
       await chrome.storage.local.set({
+        preferences: { onboardingSeen: true },
         'lesson:keyboard01': {
           schema: 2,
           videoId: 'keyboard01',
@@ -189,6 +191,53 @@ const copy = (from, to) => {
       assert.equal(await answers.nth(1).isDisabled(), true);
       assert.equal(await page.locator('video').evaluate((video) => video.currentTime), 3);
     });
+    await check('Escape closes lesson dialogs and returns focus to each opener', async () => {
+      const helpButton = page.getByRole('button', { name: 'Как заниматься', exact: true });
+      await helpButton.click();
+      const helpDialog = page.getByRole('dialog', { name: 'Как заниматься' });
+      await helpDialog.waitFor();
+      await helpDialog.press('Escape');
+      await helpDialog.waitFor({ state: 'hidden' });
+      assert.equal(
+        await helpButton.evaluate((node) => node.getRootNode().activeElement === node),
+        true,
+      );
+
+      const settingsButton = page.getByRole('button', { name: 'Настройки', exact: true });
+      await settingsButton.click();
+      const settingsDialog = page.getByRole('dialog', { name: 'Подстрой под себя' });
+      await settingsDialog.press('Escape');
+      await settingsDialog.waitFor({ state: 'hidden' });
+      assert.equal(
+        await settingsButton.evaluate((node) => node.getRootNode().activeElement === node),
+        true,
+      );
+
+      const summaryButton = page.getByRole('button', { name: 'Разбор ошибок', exact: true });
+      await summaryButton.click();
+      const summaryDialog = page.getByRole('dialog', { name: 'Разбор ошибок' });
+      await summaryDialog.press('Escape');
+      await summaryDialog.waitFor({ state: 'hidden' });
+      assert.equal(
+        await summaryButton.evaluate((node) => node.getRootNode().activeElement === node),
+        true,
+      );
+
+      const importButton = page.getByRole('button', { name: 'Открыть SRT/VTT', exact: true });
+      await page.locator('input[type=file]').setInputFiles({
+        name: 'keyboard-replacement.srt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('1\n00:00:01,000 --> 00:00:03,000\nReplacement'),
+      });
+      const sourceDialog = page.getByRole('dialog', { name: 'Сменить источник субтитров?' });
+      await sourceDialog.waitFor();
+      await sourceDialog.press('Escape');
+      await sourceDialog.waitFor({ state: 'hidden' });
+      assert.equal(
+        await importButton.evaluate((node) => node.getRootNode().activeElement === node),
+        true,
+      );
+    });
     await check('exiting restores the player keyboard shortcut', async () => {
       await page.locator('.header .controls button').last().click();
       await reset();
@@ -200,6 +249,7 @@ const copy = (from, to) => {
       assert.ok(Math.abs(video.time - video.duration / 2) < 0.1);
     });
     assert.deepEqual(failures, [], 'keyboard regression checks failed');
+    console.log('PASS: keyboard and NumPad regression checks');
   } finally {
     await context.close();
   }

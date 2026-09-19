@@ -158,11 +158,14 @@
     'Закрыть разбор': 'Close review',
     'Повтор завершён. Основная оценка сохранена.':
       'Review complete. Your main result is unchanged.',
+    'Не удалось продолжить воспроизведение. Нажмите кнопку «Продолжить».':
+      'Playback could not resume. Press Continue.',
     'Сменить источник субтитров?': 'Change subtitle source?',
     'Смена субтитров начнёт новую тренировку и удалит текущие ответы, ошибки и подсказки для этого видео.':
       'Changing subtitles will start a new practice session and remove the current answers, mistakes and hints for this video.',
     'Сменить субтитры': 'Change subtitles',
     'Реклама · задания приостановлены. ': 'Ad · practice is paused. ',
+    'Реклама · задания приостановлены.': 'Ad · practice is paused.',
     ' · автоматические': ' · auto-generated',
     'Расшифровка YouTube · текущий язык': 'YouTube transcript · current language',
     ' · время округлено до секунд; окончание строки приблизительное':
@@ -170,6 +173,9 @@
 
     'Повторить с {time}': 'Replay from {time}',
     'Пропущенное слово, строка {number}': 'Missing word, line {number}',
+    пропуск: 'gap',
+    'Пропущенное слово, строка {number}. Контекст: {context}':
+      'Missing word, line {number}. Context: {context}',
     'Первая буква: {letter}': 'First letter: {letter}',
     ' · сдвиг {offset} с': ' · offset {offset} s',
     'Тренировка восстановлена · {source}': 'Practice restored · {source}',

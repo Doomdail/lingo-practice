@@ -17,7 +17,7 @@
     rows = [],
     current = -1;
   let previousTime = video.currentTime,
-    pausedAt = -1,
+    pauseGate = null,
     ready = false,
     interval,
     mediaAbort;
@@ -42,7 +42,8 @@
     preferenceChanges = {},
     wordProfile = { schema: 1, words: {} };
   let noticeState = 'loading',
-    noticeMessage = '';
+    noticeMessage = '',
+    adPlaying = false;
   const i18n = globalThis.LingoI18n;
   const language = () => i18n.resolve(prefs.language, navigator.language);
   const t = (key, parameters) => i18n.text(key, parameters, language());
@@ -98,10 +99,11 @@
     el('span', 'beta', 'BETA'),
   );
   const headerActions = el('div', 'controls');
-  headerActions.append(
-    button('Настройки', 'exit', () => settingsDialog.showModal()),
-    button('Выйти', 'exit', close),
+  const helpButton = button('Как заниматься', 'exit', () => showOnboarding(helpButton));
+  const settingsButton = button('Настройки', 'exit', () =>
+    showDialog(settingsDialog, settingsButton),
   );
+  headerActions.append(helpButton, settingsButton, button('Выйти', 'exit', close));
   header.append(brand, headerActions);
   const lesson = el('main', 'lesson');
   const heading = el('div', 'lesson-heading');
@@ -147,7 +149,8 @@
   const summaryButton = button('Разбор ошибок', 'secondary', showSummary);
   sources.append(select, importButton, summaryButton, fileInput);
   const notice = el('div', 'notice', 'Загружаем субтитры…');
-  notice.setAttribute('role', 'status');
+  const adStatus = el('div', 'ad-status');
+  adStatus.hidden = true;
   const retry = button('Повторить загрузку', 'secondary retry', () =>
     load(failedSelection ?? select.value),
   );
@@ -155,6 +158,8 @@
   const reviewBar = el('div', 'review-bar');
   reviewBar.hidden = true;
   const reviewLabel = el('span');
+  reviewLabel.setAttribute('aria-live', 'polite');
+  reviewLabel.setAttribute('aria-atomic', 'true');
   reviewBar.append(reviewLabel, button('К основной тренировке', 'secondary', leaveReview));
   const list = el('div', 'cue-list');
   setAttr(list, 'aria-label', 'Субтитры с пропусками');
@@ -165,20 +170,36 @@
   autoPause.type = 'checkbox';
   listen(autoPause, 'change', () => {
     prefs.autoPause = autoPause.checked;
+    if (!prefs.autoPause) clearPauseGate();
     preferenceChanges.autoPause = prefs.autoPause;
     saveNow();
   });
   pauseLabel.append(autoPause, el('span', '', 'Пауза в конце строки'));
   footer.append(hint, pauseLabel);
   const saveStatus = el('span', 'save-status', 'Прогресс хранится на устройстве');
-  saveStatus.setAttribute('role', 'status');
   footer.append(saveStatus);
-  lesson.append(heading, toolbar, sources, notice, retry, reviewBar, list, footer);
+  const announcer = el('div', 'sr-only announcer');
+  announcer.setAttribute('aria-live', 'polite');
+  announcer.setAttribute('aria-atomic', 'true');
+  lesson.append(
+    heading,
+    toolbar,
+    sources,
+    notice,
+    adStatus,
+    retry,
+    reviewBar,
+    list,
+    footer,
+    announcer,
+  );
   shell.append(header, lesson);
   shadow.append(shell);
   const settingsDialog = el('dialog', 'settings-dialog');
-  setAttr(settingsDialog, 'aria-label', 'Настройки тренировки');
-  settingsDialog.append(el('h2', '', 'Подстрой под себя'));
+  const settingsTitle = el('h2', '', 'Подстрой под себя');
+  settingsTitle.id = 'practice-settings-title';
+  settingsDialog.setAttribute('aria-labelledby', settingsTitle.id);
+  settingsDialog.append(settingsTitle);
   const settingsGrid = el('div', 'settings-grid');
   const field = (labelText, node) => {
     const label = el('label', 'setting', labelText);
@@ -247,14 +268,16 @@
   );
   const settingsMessage = el('p', 'settings-message');
   settingsMessage.hidden = true;
-  settingsMessage.setAttribute('role', 'status');
   settingsDialog.append(
     settingsMessage,
     button('Мои занятия', 'secondary', openLibrary),
     button('Закрыть настройки', 'primary', () => settingsDialog.close()),
   );
   const summaryDialog = el('dialog', 'summary-dialog');
-  setAttr(summaryDialog, 'aria-label', 'Разбор ошибок');
+  const summaryDialogTitle = el('h2', '', 'Разбор ошибок');
+  summaryDialogTitle.id = 'mistake-summary-title';
+  summaryDialog.setAttribute('aria-labelledby', summaryDialogTitle.id);
+  summaryDialog.append(summaryDialogTitle);
   const sourceDialog = el('dialog', 'modal source-dialog');
   const sourceDialogTitle = el('h2', '', 'Сменить источник субтитров?');
   sourceDialogTitle.id = 'source-change-title';
@@ -273,7 +296,22 @@
     ),
     sourceDialogActions,
   );
-  shadow.append(settingsDialog, summaryDialog, sourceDialog);
+  const helpDialog = el('dialog', 'modal help-dialog');
+  const helpDialogTitle = el('h2', '', 'Как заниматься');
+  helpDialogTitle.id = 'practice-help-title';
+  helpDialog.setAttribute('aria-labelledby', helpDialogTitle.id);
+  const helpSteps = el('ol', 'help-steps');
+  helpSteps.append(
+    el('li', '', 'Выберите дорожку или импортируйте SRT/VTT.'),
+    el('li', '', 'Слушайте, вписывайте слово и нажимайте Enter.'),
+    el('li', '', 'Используйте повтор и подсказки; прогресс сохраняется автоматически.'),
+  );
+  helpDialog.append(
+    helpDialogTitle,
+    helpSteps,
+    button('Закрыть', 'primary', () => helpDialog.close('closed')),
+  );
+  shadow.append(settingsDialog, summaryDialog, sourceDialog, helpDialog);
   listen(languageSelect, 'change', () => {
     prefs.language = languageSelect.value;
     preferenceChanges.language = prefs.language;
@@ -318,7 +356,7 @@
     if (ready && !busy && noticeState !== 'error') setNotice('source');
     offsetInput.value = offset;
     stopSlowReplay();
-    pausedAt = -1;
+    clearPauseGate();
     previousTime = captionTime();
     tick();
     saveNow();
@@ -347,17 +385,22 @@
 
   function close() {
     if (disposed) return;
-    saveNow();
     stopSlowReplay();
+    clearPauseGate();
+    const onboardingSaved = helpDialog.open && !prefs.onboardingSeen;
+    if (onboardingSaved) markOnboardingSeen();
+    if (sourceDialog.open) sourceDialog.close('cancel');
+    sourceConfirmation?.(false);
+    if (helpDialog.open) helpDialog.close('closed');
+    if (settingsDialog.open) settingsDialog.close();
+    if (summaryDialog.open) summaryDialog.close();
+    if (!onboardingSaved) saveNow();
     disposed = true;
     revision++;
-    if (sourceDialog.open) sourceDialog.close('cancel');
     abort.abort();
     mediaAbort?.abort();
     rowAbort.abort();
     clearInterval(interval);
-    settingsDialog.close();
-    summaryDialog.close();
     player.classList.remove('lp-player');
     document.documentElement.classList.remove('lp-active');
     host.remove();
@@ -380,6 +423,25 @@
   const captionTime = () => video.currentTime - offset;
   const isAd = () =>
     player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
+  const clearPauseGate = (reason = null) => {
+    if (!reason || pauseGate?.reason === reason) pauseGate = null;
+  };
+  async function resumeAfterAnswer(index) {
+    if (
+      pauseGate?.reason !== 'answer' ||
+      pauseGate.index !== index ||
+      !prefs.autoPause ||
+      isAd() ||
+      video.ended
+    )
+      return;
+    pauseGate = null;
+    try {
+      await video.play();
+    } catch {
+      setNotice('error', 'Не удалось продолжить воспроизведение. Нажмите кнопку «Продолжить».');
+    }
+  }
   function applyLanguage() {
     host.lang = language();
     languageSelect.value = prefs.language;
@@ -394,7 +456,8 @@
     }
     for (const node of select.querySelectorAll('[data-source-label]'))
       node.textContent = translateSource(node.dataset.sourceLabel);
-    notice.dataset.adMessage = t('Реклама · задания приостановлены. ');
+    rows.forEach((row, index) => setAnswerLabel(row.input, tasks[index], index));
+    if (adPlaying) setText(adStatus, 'Реклама · задания приостановлены.');
     setText(play, video.paused ? 'Продолжить' : 'Пауза');
     paintNotice();
   }
@@ -429,9 +492,25 @@
     );
   }
   function setNotice(state, message = '') {
+    const changed = state !== noticeState || message !== noticeMessage;
     noticeState = state;
     noticeMessage = message;
     paintNotice();
+    if (state === 'error' && changed) announce(message);
+    else if (state !== 'error') allowRepeatAnnouncement();
+  }
+  let lastAnnouncement = '';
+  function announce(key, parameters = {}) {
+    const message = t(key, parameters);
+    if (!message || message === lastAnnouncement) return;
+    lastAnnouncement = message;
+    announcer.textContent = '';
+    requestAnimationFrame(() => {
+      if (!disposed) announcer.textContent = message;
+    });
+  }
+  function allowRepeatAnnouncement() {
+    lastAnnouncement = '';
   }
   function paintNotice() {
     notice.className =
@@ -506,6 +585,7 @@
         if (!disposed) {
           setText(saveStatus, 'Сохранено на устройстве');
           saveStatus.classList.remove('error');
+          allowRepeatAnnouncement();
         }
         return true;
       })
@@ -515,16 +595,16 @@
           for (const [key, value] of Object.entries(changed))
             if (prefs[key] === value && !(key in preferenceChanges)) preferenceChanges[key] = value;
         if (!disposed) {
-          setText(
-            saveStatus,
+          const message =
             error.code === 'EPOCH_CONFLICT'
               ? error.message
               : error.code === 'REVISION_CONFLICT' || error.message.includes('другой вкладке')
                 ? 'Прогресс обновлён в другой вкладке. Переоткройте тренировку.'
-                : 'Прогресс не сохранён',
-          );
+                : 'Прогресс не сохранён';
+          setText(saveStatus, message);
           setAttr(saveStatus, 'title', error.message);
           saveStatus.classList.add('error');
+          announce(message);
         }
         return false;
       });
@@ -556,6 +636,7 @@
         ready = true;
         applyPreferences();
         draw();
+        maybeShowOnboarding();
         tick();
         setNotice('restored');
         setText(saveStatus, 'Прогресс восстановлен');
@@ -565,6 +646,7 @@
       setText(saveStatus, 'Сохранение недоступно');
       setAttr(saveStatus, 'title', error.message);
       saveStatus.classList.add('error');
+      announce('Сохранение недоступно');
     }
     if (disposed) return;
     initialized = true;
@@ -575,7 +657,7 @@
     rowAbort.abort();
     rowAbort = new AbortController();
     current = -1;
-    pausedAt = -1;
+    clearPauseGate();
     rows = tasks.map(renderCue);
     list.replaceChildren(...rows.map((row) => row.node));
     repeat.disabled = !ready;
@@ -584,6 +666,41 @@
     updateStats();
     tick();
   }
+  function showDialog(dialog, returnFocus) {
+    dialog.addEventListener(
+      'close',
+      () => {
+        if (!disposed) returnFocus?.focus();
+      },
+      { once: true, signal },
+    );
+    dialog.showModal();
+  }
+  function markOnboardingSeen() {
+    if (prefs.onboardingSeen) return;
+    prefs.onboardingSeen = true;
+    preferenceChanges.onboardingSeen = true;
+    saveNow();
+  }
+  function showOnboarding(returnFocus = null) {
+    helpDialog.returnValue = 'closed';
+    helpDialog.addEventListener(
+      'close',
+      () => {
+        markOnboardingSeen();
+        if (!disposed) (returnFocus ?? firstUnfinishedInput() ?? select).focus();
+      },
+      { once: true, signal },
+    );
+    helpDialog.showModal();
+  }
+  function maybeShowOnboarding() {
+    if (ready && !prefs.onboardingSeen && !helpDialog.open) showOnboarding();
+  }
+  function firstUnfinishedInput() {
+    return rows.find((row, index) => tasks[index]?.answer && !exercise.finished(tasks[index]))
+      ?.input;
+  }
   function setSourceBusy(value) {
     busy = value;
     select.disabled = value || Boolean(review);
@@ -591,6 +708,7 @@
   }
   async function openLibrary() {
     settingsMessage.hidden = true;
+    allowRepeatAnnouncement();
     await saveNow();
     if (disposed) return;
     let result;
@@ -601,13 +719,19 @@
     if (!result?.opened) {
       setText(settingsMessage, 'Не удалось открыть «Мои занятия». Повторите попытку.');
       settingsMessage.hidden = false;
+      announce('Не удалось открыть «Мои занятия». Повторите попытку.');
       return;
     }
     settingsDialog.close();
   }
+  let sourceConfirmation = null;
   function confirmSourceChange(returnFocus) {
     return new Promise((resolve) => {
+      let settled = false;
       const finish = (confirmed) => {
+        if (settled) return;
+        settled = true;
+        sourceConfirmation = null;
         sourceDialog.removeEventListener('close', onClose);
         signal.removeEventListener('abort', onAbort);
         setSourceBusy(false);
@@ -617,12 +741,14 @@
       const onClose = () => finish(sourceDialog.returnValue === 'confirm');
       const onAbort = () => finish(false);
       sourceDialog.returnValue = 'cancel';
+      sourceConfirmation = finish;
       sourceDialog.addEventListener('close', onClose, { once: true });
       signal.addEventListener('abort', onAbort, { once: true });
       sourceDialog.showModal();
     });
   }
   function rebuildUntouchedTasks() {
+    clearPauseGate();
     tasks = exercise.createTasks(tasks, {
       random: Math.random,
       difficulty: prefs.difficulty,
@@ -633,6 +759,7 @@
     if (ready) draw();
   }
   async function commit(cues, label, selection, rounded = false, returnFocus = select) {
+    clearPauseGate();
     const nextTasks = exercise.createTasks(cues, {
       random: Math.random,
       difficulty: prefs.difficulty,
@@ -672,6 +799,7 @@
     setNotice('source');
     previousTime = captionTime();
     draw();
+    maybeShowOnboarding();
     saveNow();
     return true;
   }
@@ -748,7 +876,7 @@
     const input = el('input', 'answer');
     input.type = 'text';
     input.dataset.cue = index;
-    setAttr(input, 'aria-label', 'Пропущенное слово, строка {number}', { number: index + 1 });
+    setAnswerLabel(input, task, index);
     input.setAttribute('autocomplete', 'off');
     input.setAttribute('autocorrect', 'off');
     input.setAttribute('autocapitalize', 'off');
@@ -784,6 +912,15 @@
     const row = { node, input, feedback, skip, help, timestamp };
     paintRow(task, row);
     return row;
+  }
+  function setAnswerLabel(input, task, index) {
+    const context = `${task.before.slice(-80)} ${t('пропуск')} ${task.after.slice(0, 80)}`
+      .replace(/\s+/g, ' ')
+      .trim();
+    setAttr(input, 'aria-label', 'Пропущенное слово, строка {number}. Контекст: {context}', {
+      number: index + 1,
+      context,
+    });
   }
   function paintRow(task, row) {
     row.node.className = 'cue' + (task.status !== 'pending' ? ' ' + task.status : '');
@@ -835,10 +972,17 @@
     paintRow(task, row);
     updateStats();
     saveNow();
-    if (review && pausedAt === index && (video.ended || captionTime() >= task.end)) {
+    if (
+      review &&
+      pauseGate?.reason === 'review' &&
+      pauseGate.index === index &&
+      (video.ended || captionTime() >= task.end)
+    ) {
       advanceReview();
       return;
     }
+    if (!review && ['correct', 'assisted'].includes(task.status)) void resumeAfterAnswer(index);
+    else if (!review) clearPauseGate('answer');
     const next = tasks.findIndex((t, i) => i > index && t.answer && !exercise.finished(t));
     if (next >= 0) {
       rows[next].input.focus({ preventScroll: true });
@@ -915,7 +1059,7 @@
       };
       video.playbackRate = 0.75;
     }
-    pausedAt = -1;
+    clearPauseGate();
     video.currentTime = Math.max(0, task.start + offset);
     previousTime = captionTime();
     try {
@@ -942,7 +1086,7 @@
       'Самостоятельно: {independent} · с подсказкой: {assisted} · показано: {revealed} · пропущено: {skipped} · без ответа: {remaining}',
       counts,
     );
-    summaryDialog.replaceChildren(el('h2', '', 'Разбор ошибок'), summaryCounts);
+    summaryDialog.replaceChildren(summaryDialogTitle, summaryCounts);
     const entries = el('div', 'review-entries');
     for (const task of difficult) {
       const entry = el('article', 'review-entry');
@@ -977,12 +1121,13 @@
       button('Закрыть разбор', 'secondary', () => summaryDialog.close()),
     );
     summaryDialog.append(actions);
-    summaryDialog.showModal();
+    showDialog(summaryDialog, summaryButton);
   }
   function startReview(difficult) {
     if (!difficult.length || isAd()) return;
     summaryDialog.close();
     stopSlowReplay();
+    clearPauseGate();
     review = { base: tasks, position: video.currentTime, index: 0, done: false };
     tasks = difficult.map((task, id) => ({
       ...task,
@@ -1002,6 +1147,7 @@
   function advanceReview() {
     if (!review || review.done) return;
     stopSlowReplay();
+    clearPauseGate();
     if (review.index + 1 >= tasks.length) {
       review.done = true;
       video.pause();
@@ -1014,6 +1160,7 @@
   function leaveReview() {
     if (!review) return;
     stopSlowReplay();
+    clearPauseGate();
     video.pause();
     const previous = review;
     review = null;
@@ -1065,11 +1212,20 @@
       player = replacement;
       video = media;
       player.classList.add('lp-player');
-      pausedAt = -1;
+      clearPauseGate();
       previousTime = captionTime();
       bindMedia();
     }
     const ad = isAd();
+    if (ad !== adPlaying) {
+      adPlaying = ad;
+      clearPauseGate();
+      adStatus.hidden = !ad;
+      if (ad) {
+        setText(adStatus, 'Реклама · задания приостановлены.');
+        announce('Реклама · задания приостановлены.');
+      } else allowRepeatAnnouncement();
+    }
     shell.classList.toggle('ad-playing', ad);
     if (ad) {
       stopSlowReplay();
@@ -1100,7 +1256,7 @@
         advanceReview();
         return;
       }
-      pausedAt = review.index;
+      pauseGate = { reason: 'review', index: review.index };
       video.pause();
     }
     if (
@@ -1108,18 +1264,17 @@
       autoPause.checked &&
       !video.paused &&
       current >= 0 &&
-      pausedAt < 0 &&
+      !pauseGate &&
       tasks[current].answer &&
       !exercise.finished(tasks[current]) &&
       previousTime < tasks[current].end &&
       time >= tasks[current].end &&
       time - previousTime < 1.5
     ) {
-      pausedAt = current;
+      pauseGate = { reason: 'answer', index: current };
       video.pause();
     }
-    const index =
-      pausedAt >= 0 ? pausedAt : review ? review.index : exercise.activeIndex(tasks, time);
+    const index = pauseGate?.index ?? (review ? review.index : exercise.activeIndex(tasks, time));
     if (review && !review.done)
       setText(reviewLabel, 'Повтор сложных мест · {current} из {total}', {
         current: review.index + 1,
@@ -1172,13 +1327,13 @@
       video.addEventListener(event, callback, { signal: mediaAbort.signal });
     on('timeupdate', tick);
     on('seeked', () => {
-      pausedAt = -1;
+      clearPauseGate();
       previousTime = captionTime();
       tick();
       saveNow();
     });
     on('play', () => {
-      pausedAt = -1;
+      clearPauseGate();
       previousTime = captionTime();
       setText(play, 'Пауза');
       tick();
@@ -1190,6 +1345,7 @@
     });
     on('loadedmetadata', tick);
     on('ended', () => {
+      clearPauseGate();
       tick();
       updateStats();
       saveNow();

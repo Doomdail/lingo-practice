@@ -12,6 +12,17 @@
 [hidden] {
   display: none !important;
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 button,
 input,
 select {
@@ -33,8 +44,8 @@ button:disabled {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 2px solid #a6edbd;
-  outline-offset: 4px;
+  outline: 3px solid #a6edbd;
+  outline-offset: 3px;
 }
 .shell {
   position: absolute;
@@ -545,8 +556,8 @@ dialog.modal {
   opacity: 0.4;
   pointer-events: none;
 }
-.ad-playing .notice::before {
-  content: attr(data-ad-message);
+.ad-status {
+  margin: 7px 0;
   color: #f0c4ae;
 }
 @media (max-height: 850px) {
@@ -643,12 +654,25 @@ dialog.modal {
   }
 }
 @media (max-width: 380px) {
+  .brand > :not(.brand-mark) {
+    display: none;
+  }
+  .header {
+    gap: 0.5rem;
+  }
+  .controls {
+    flex-wrap: wrap;
+  }
   .dialog-actions > button {
     flex: 1 1 100%;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
