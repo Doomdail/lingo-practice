@@ -79,6 +79,27 @@ test('a difficult saved task appears even before it has a profile counter', () =
   assert.equal(entry.context.text, 'An unfamiliar phrase');
 });
 
+test('vocabulary keeps profile keys authoritative and omits profile-only fields', () => {
+  const entries = data.vocabulary(
+    {
+      schema: 1,
+      words: {
+        friend: { ...profile.words.friend, word: 'override', privateNote: 'do not export' },
+      },
+    },
+    [newerLesson],
+  );
+  assert.equal(entries[0].word, 'friend');
+  assert.equal('privateNote' in entries[0], false);
+});
+
+test('untouched pending tasks do not replace genuinely difficult vocabulary context', () => {
+  const untouchedNewerLesson = session('untouched01', 30, [task()]);
+  const [entry] = data.vocabulary(profile, [newerLesson, untouchedNewerLesson]);
+  assert.equal(entry.context.videoId, 'newer01');
+  assert.equal(entry.context.text, 'Hello, friend!');
+});
+
 test('CSV is Excel-safe UTF-8 with the exact public columns', () => {
   const csv = data.createVocabularyCsv([
     {
@@ -155,6 +176,21 @@ test('future, duplicate, oversized and one-bad-record backups fail atomically', 
   }
 });
 
+test('backup parser refuses malformed preferences and word-profile containers', () => {
+  const base = data.createBackup(
+    { preferences: {}, wordProfile: profile, lessons: [newerLesson] },
+    '2026-09-19T12:00:00.000Z',
+  );
+  const badFontSize = structuredClone(base);
+  badFontSize.preferences.fontSize = {};
+  const primitiveWords = structuredClone(base);
+  primitiveWords.wordProfile.words = true;
+  const primitiveProfile = structuredClone(base);
+  primitiveProfile.wordProfile = 123;
+  for (const backup of [badFontSize, primitiveWords, primitiveProfile])
+    assert.equal(data.parseBackup(backup).ok, false);
+});
+
 test('merge chooses strictly newer lessons and words and is idempotent', () => {
   const local = {
     preferences: exercise.preferences(),
@@ -202,4 +238,22 @@ test('merge leaves preferences local unless selected and never sums word counter
   assert.equal(result.next.preferences.fontSize, 16);
   assert.equal(result.next.wordProfile.words.friend.attempts, 4);
   assert.equal(result.summary.wordsUpdated, 0);
+});
+
+test('merge recognizes constructor and own JSON __proto__ words', () => {
+  const importedProfile = JSON.parse(
+    '{"schema":1,"words":{"constructor":{"attempts":1,"clean":0,"mistakes":1,"hints":0,"misses":0,"lastSeenAt":22},"__proto__":{"attempts":1,"clean":0,"mistakes":1,"hints":0,"misses":0,"lastSeenAt":22}}}',
+  );
+  const imported = data.createBackup(
+    { preferences: {}, wordProfile: importedProfile, lessons: [] },
+    '2026-09-19T12:00:00.000Z',
+  );
+  const result = data.planBackupImport(
+    { preferences: {}, wordProfile: { schema: 1, words: {} }, lessons: [] },
+    imported,
+  );
+  assert.equal(result.summary.wordsUpdated, 2);
+  assert.equal(result.next.wordProfile.words.constructor.attempts, 1);
+  assert.equal(Object.hasOwn(result.next.wordProfile.words, '__proto__'), true);
+  assert.equal(result.next.wordProfile.words.__proto__.attempts, 1);
 });

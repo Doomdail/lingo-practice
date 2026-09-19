@@ -10,7 +10,7 @@
     const contexts = new Map();
     for (const lesson of [...lessons].sort((a, b) => b.updatedAt - a.updatedAt)) {
       for (const task of [...lesson.tasks].reverse()) {
-        if (!task.answer || !exercise.isDifficult(task, true)) continue;
+        if (!task.answer || !exercise.isDifficult(task)) continue;
         const word = exercise.normalizeAnswer(task.answer);
         if (!contexts.has(word))
           contexts.set(word, {
@@ -25,17 +25,24 @@
     const words = new Set([...Object.keys(profile.words), ...contexts.keys()]);
     return [...words]
       .map((word) => {
-        const entry = profile.words[word] ?? {
-          attempts: 0,
-          clean: 0,
-          mistakes: 0,
-          hints: 0,
-          misses: 0,
-          lastSeenAt: 0,
-        };
+        const entry = Object.hasOwn(profile.words, word)
+          ? profile.words[word]
+          : {
+              attempts: 0,
+              clean: 0,
+              mistakes: 0,
+              hints: 0,
+              misses: 0,
+              lastSeenAt: 0,
+            };
         return {
           word,
-          ...entry,
+          attempts: entry.attempts,
+          clean: entry.clean,
+          mistakes: entry.mistakes,
+          hints: entry.hints,
+          misses: entry.misses,
+          lastSeenAt: entry.lastSeenAt,
           score: entry.mistakes + entry.hints + 2 * entry.misses,
           context: contexts.get(word) ?? null,
         };
@@ -84,6 +91,18 @@
   }
 
   function canonicalWordProfile(value, strict = false) {
+    if (
+      strict &&
+      (!value ||
+        typeof value !== 'object' ||
+        Array.isArray(value) ||
+        !Object.hasOwn(value, 'schema') ||
+        !Object.hasOwn(value, 'words') ||
+        !value.words ||
+        typeof value.words !== 'object' ||
+        Array.isArray(value.words))
+    )
+      return null;
     const restored = exercise.restoreWordProfile(value, strict);
     if (!restored) return null;
     return {
@@ -171,6 +190,21 @@
     };
   }
 
+  function validPreferences(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const normalized = exercise.preferences(value);
+    return [
+      'difficulty',
+      'gapFrequency',
+      'language',
+      'videoSize',
+      'fontSize',
+      'visibleRows',
+      'autoPause',
+      'onboardingSeen',
+    ].every((key) => !Object.hasOwn(value, key) || value[key] === normalized[key]);
+  }
+
   function parseBackup(value) {
     const fail = (message) => ({ ok: false, message });
     let encoded;
@@ -189,6 +223,7 @@
       !value.preferences ||
       typeof value.preferences !== 'object' ||
       Array.isArray(value.preferences) ||
+      !validPreferences(value.preferences) ||
       !Array.isArray(value.lessons) ||
       value.lessons.length > limits.lessons
     )
@@ -223,8 +258,13 @@
     const local = canonicalWordProfile(localValue);
     const imported = canonicalWordProfile(importedValue, true);
     for (const [word, entry] of Object.entries(imported.words)) {
-      if (!local.words[word] || entry.lastSeenAt > local.words[word].lastSeenAt) {
-        local.words[word] = { ...entry };
+      if (!Object.hasOwn(local.words, word) || entry.lastSeenAt > local.words[word].lastSeenAt) {
+        Object.defineProperty(local.words, word, {
+          value: { ...entry },
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
         summary.wordsUpdated++;
       }
     }
