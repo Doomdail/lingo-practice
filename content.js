@@ -245,7 +245,11 @@
       'Сложность меняет только ещё не начатые задания. На небольшом экране видимых строк может быть меньше выбранного числа.',
     ),
   );
+  const settingsMessage = el('p', 'settings-message');
+  settingsMessage.hidden = true;
+  settingsMessage.setAttribute('role', 'status');
   settingsDialog.append(
+    settingsMessage,
     button('Мои занятия', 'secondary', openLibrary),
     button('Закрыть настройки', 'primary', () => settingsDialog.close()),
   );
@@ -586,10 +590,20 @@
     importButton.disabled = value || Boolean(review);
   }
   async function openLibrary() {
+    settingsMessage.hidden = true;
     await saveNow();
     if (disposed) return;
+    let result;
+    try {
+      result = await chrome.runtime.sendMessage({ type: 'LINGO_OPEN_LIBRARY' });
+    } catch {}
+    if (disposed) return;
+    if (!result?.opened) {
+      setText(settingsMessage, 'Не удалось открыть «Мои занятия». Повторите попытку.');
+      settingsMessage.hidden = false;
+      return;
+    }
     settingsDialog.close();
-    await chrome.runtime.openOptionsPage();
   }
   function confirmSourceChange(returnFocus) {
     return new Promise((resolve) => {

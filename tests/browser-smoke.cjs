@@ -603,6 +603,39 @@ const hasLibraryRuntime = ['library.html', 'library.js', 'library.css'].every((n
       );
       await libraryPage?.close();
 
+      assert.equal(
+        await worker.evaluate(() => {
+          globalThis.task6OriginalOpenOptionsPage = chrome.runtime.openOptionsPage;
+          chrome.runtime.openOptionsPage = async () => {
+            throw new Error('test open failure');
+          };
+          return chrome.runtime.openOptionsPage !== globalThis.task6OriginalOpenOptionsPage;
+        }),
+        true,
+        'the fixture can simulate an options-page failure',
+      );
+      const pagesBeforeFailedLibrary = context.pages().length;
+      await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+      await page.getByRole('button', { name: 'Мои занятия', exact: true }).click();
+      await page
+        .getByText('Не удалось открыть «Мои занятия». Повторите попытку.', { exact: true })
+        .waitFor({ timeout: 3000 });
+      assert.equal(
+        await page.locator('.settings-dialog').evaluate((node) => node.open),
+        true,
+        'a failed library open keeps settings usable',
+      );
+      assert.equal(context.pages().length, pagesBeforeFailedLibrary);
+      assert.equal(
+        await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).isEnabled(),
+        true,
+      );
+      await worker.evaluate(() => {
+        chrome.runtime.openOptionsPage = globalThis.task6OriginalOpenOptionsPage;
+        delete globalThis.task6OriginalOpenOptionsPage;
+      });
+      await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
+
       const attemptsBeforeConflict = await worker.evaluate(() => globalThis.task6SaveAttempts);
       await worker.evaluate(async () => {
         const { storageEpoch } = await chrome.storage.local.get('storageEpoch');

@@ -474,6 +474,14 @@ dialog.modal {
   line-height: 1.6;
   margin: 16px 0;
 }
+.settings-message {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid #65483d;
+  border-radius: 8px;
+  background: #332620;
+  color: #f0c4ae;
+}
 .summary-dialog[open] {
   display: flex;
   flex-direction: column;

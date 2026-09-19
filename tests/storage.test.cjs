@@ -51,7 +51,8 @@ const save = (value, version = 0, writerId = 'writer-a', preferences, storageEpo
 function worker(initial = {}, hooks = {}) {
   const data = structuredClone(initial);
   let receive,
-    reads = 0;
+    reads = 0,
+    opens = 0;
   if (typeof hooks === 'function') hooks = { beforeSet: hooks };
   vm.runInNewContext(source, {
     console,
@@ -64,6 +65,10 @@ function worker(initial = {}, hooks = {}) {
       runtime: {
         id: 'lingo-test',
         getURL: (file) => `chrome-extension://lingo-test/${file}`,
+        async openOptionsPage() {
+          await hooks.beforeOpenOptionsPage?.();
+          opens++;
+        },
         onMessage: {
           addListener(listener) {
             receive = listener;
@@ -105,9 +110,11 @@ function worker(initial = {}, hooks = {}) {
     sendLesson,
     sendLibrary: (message, sender = librarySender) =>
       send({ type: 'LINGO_LIBRARY', ...message }, sender),
+    sendOpenLibrary: (sender = lessonSender) => send({ type: 'LINGO_OPEN_LIBRARY' }, sender),
     sendRaw: send,
     snapshot: () => structuredClone(data),
     reads: () => reads,
+    opens: () => opens,
   };
 }
 
@@ -140,6 +147,36 @@ test('only the extension main frame on a YouTube watch page reaches lesson stora
     assert.equal(await app.sendLesson({ action: 'get', videoId }), undefined);
   assert.equal(await app.sendLesson({ action: 'delete' }), undefined);
   assert.equal(app.reads(), 1);
+});
+
+test('only a trusted top-frame lesson can open the library and failures are stable', async () => {
+  const app = worker();
+  assert.deepEqual(await app.sendOpenLibrary(), { opened: true });
+  assert.equal(app.opens(), 1);
+  for (const patch of [
+    { id: 'foreign-extension' },
+    { id: undefined },
+    { frameId: 1 },
+    { frameId: undefined },
+    { tab: undefined },
+    { tab: { id: '1' } },
+    { tab: { id: -1 } },
+    { url: 'http://www.youtube.com/watch?v=video01' },
+    { url: 'https://www.youtube.com/shorts/video01' },
+    { url: 'https://www.youtube.com.evil.test/watch?v=video01' },
+    { url: 'https://www.youtube.com/watch/extra' },
+  ])
+    assert.equal(await app.sendOpenLibrary({ ...lessonSender, ...patch }), undefined);
+  assert.equal(app.opens(), 1);
+  assert.equal(app.reads(), 0);
+
+  const failed = worker({}, { beforeOpenOptionsPage: () => Promise.reject(new Error('blocked')) });
+  assert.deepEqual(await failed.sendOpenLibrary(), {
+    error: 'Не удалось открыть «Мои занятия». Повторите попытку.',
+    code: 'OPEN_LIBRARY_FAILED',
+  });
+  assert.equal(failed.opens(), 0);
+  assert.equal(failed.reads(), 0);
 });
 
 const libraryLesson = (videoId, updatedAt, revision = 1) => ({

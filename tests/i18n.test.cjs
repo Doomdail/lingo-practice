@@ -190,6 +190,7 @@ test('learning controls, source confirmation and stale-storage copy have English
     'В субтитрах не найдено слов для пропусков.',
     'Тренировка изменена в другой вкладке. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.',
     'Хранилище изменено. Закройте режим и откройте снова, чтобы загрузить свежий прогресс.',
+    'Не удалось открыть «Мои занятия». Повторите попытку.',
   ];
   const placeholders = (value) => [...value.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
   for (const message of messages) {

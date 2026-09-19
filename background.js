@@ -48,15 +48,20 @@ const isLibrarySender = (message, sender) =>
   sender?.id === chrome.runtime.id &&
   sender.frameId === 0 &&
   sender.url === chrome.runtime.getURL('library.html');
+const isLessonPageSender = (sender) =>
+  sender?.id === chrome.runtime.id &&
+  Number.isInteger(sender.tab?.id) &&
+  sender.tab.id >= 0 &&
+  sender.frameId === 0 &&
+  /^https:\/\/www\.youtube\.com\/watch(?:\?|$)/.test(sender.url ?? '');
 const isLessonSender = (message, sender) =>
   message?.type === 'LINGO_STORE' &&
   LESSON_ACTIONS.has(message.action) &&
-  sender?.id === chrome.runtime.id &&
-  Boolean(sender.tab?.id) &&
-  sender.frameId === 0 &&
-  /^https:\/\/www\.youtube\.com\/watch(?:\?|$)/.test(sender.url ?? '') &&
+  isLessonPageSender(sender) &&
   typeof message.videoId === 'string' &&
   /^[\w-]{1,64}$/.test(message.videoId);
+const isOpenLibrarySender = (message, sender) =>
+  message?.type === 'LINGO_OPEN_LIBRARY' && isLessonPageSender(sender);
 
 function enqueue(operation, sendResponse) {
   const result = storageQueue.then(operation);
@@ -364,6 +369,18 @@ async function handleLibraryMessage(message) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (isOpenLibrarySender(message, sender)) {
+    Promise.resolve()
+      .then(() => chrome.runtime.openOptionsPage())
+      .then(() => sendResponse({ opened: true }))
+      .catch(() =>
+        sendResponse({
+          error: 'Не удалось открыть «Мои занятия». Повторите попытку.',
+          code: 'OPEN_LIBRARY_FAILED',
+        }),
+      );
+    return true;
+  }
   if (isLibrarySender(message, sender))
     return enqueue(() => handleLibraryMessage(message), sendResponse);
   if (isLessonSender(message, sender))

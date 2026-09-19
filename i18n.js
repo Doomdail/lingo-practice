@@ -88,6 +88,7 @@
     'Резервная копия содержит неверный профиль слов.':
       'The backup contains an invalid word profile.',
     'Резервная копия содержит неверный ID видео.': 'The backup contains an invalid video ID.',
+    'Не удалось открыть «Мои занятия». Повторите попытку.': 'Could not open My lessons. Try again.',
     Пауза: 'Pause',
     '↶ Повторить строку': '↶ Replay line',
     'К текущей строке': 'Go to current line',
