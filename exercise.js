@@ -3,6 +3,13 @@
 
   const normalizeAnswer = (value) =>
     String(value).normalize('NFKC').trim().toLocaleLowerCase('en').replace(/[’‘ʼ]/g, "'");
+  const hasStarted = (task) =>
+    Boolean(task) &&
+    (Boolean(task.value) ||
+      Number(task.mistakes) > 0 ||
+      Number(task.hints) > 0 ||
+      task.status !== 'pending');
+  const hasUserWork = (tasks) => Array.isArray(tasks) && tasks.some(hasStarted);
   const matches = (value, answer) =>
     Boolean(normalizeAnswer(value)) && normalizeAnswer(value) === normalizeAnswer(answer);
   const spoken = (text) => /\p{L}/u.test(text.replace(/\[[^\]]*\]/g, ''));
@@ -12,6 +19,8 @@
       ' ',
     ),
   );
+  const PROFILE_COUNTER_FIELDS = ['attempts', 'clean', 'mistakes', 'hints', 'misses'];
+  const PROFILE_COUNTER_MAX = 1_000_000;
   const finished = (task) => ['correct', 'assisted', 'skipped', 'revealed'].includes(task.status);
   const isDifficult = (task, includeUnanswered = false) =>
     Boolean(task.answer) &&
@@ -19,8 +28,21 @@
       task.hints > 0 ||
       ['skipped', 'revealed'].includes(task.status) ||
       (includeUnanswered && !finished(task)));
+  const adaptiveWeight = (entry = {}) => {
+    const need = (entry.mistakes ?? 0) + (entry.hints ?? 0) + 2 * (entry.misses ?? 0);
+    return Math.min(8, Math.max(0.25, (1 + need) / (1 + (entry.clean ?? 0))));
+  };
+  const pickWeighted = (words, random, profile) => {
+    const weighted = words.map((word) => [
+      word,
+      adaptiveWeight(profile.words[normalizeAnswer(word[0])]),
+    ]);
+    const total = weighted.reduce((sum, [, weight]) => sum + weight, 0);
+    let cursor = Math.min(0.999999999999, Math.max(0, random())) * total;
+    return weighted.find(([, weight]) => (cursor -= weight) < 0)?.[0] ?? weighted.at(-1)?.[0];
+  };
 
-  function create(cue, random = Math.random, difficulty = 'random') {
+  function createWithProfile(cue, random = Math.random, difficulty = 'random', profile) {
     // Keep contractions and hyphenated words intact; exclude bracketed cues and common sound labels.
     const excluded = [
       ...cue.text.matchAll(
@@ -43,14 +65,17 @@
     } else if (words.length && difficulty === 'hard') {
       const max = Math.max(...words.map(score));
       words = words.filter((word) => score(word) >= max - 2);
-    } else if (difficulty === 'balanced') {
+    }
+    if (['balanced', 'adaptive'].includes(difficulty)) {
       const meaningful = words.filter(
         (word) => word[0].length >= 4 && !common.has(normalizeAnswer(word[0])),
       );
       if (meaningful.length) words = meaningful;
     }
     const word =
-      words[Math.min(words.length - 1, Math.max(0, Math.floor(random() * words.length)))];
+      difficulty === 'adaptive'
+        ? pickWeighted(words, random, profile)
+        : words[Math.min(words.length - 1, Math.max(0, Math.floor(random() * words.length)))];
     return {
       ...cue,
       before: word ? cue.text.slice(0, word.index) : cue.text,
@@ -61,6 +86,107 @@
       mistakes: 0,
       hints: 0,
     };
+  }
+
+  function restoreWordProfile(value, strict = false) {
+    if (!value || value.schema !== 1 || !value.words || Array.isArray(value.words))
+      return strict ? null : { schema: 1, words: {} };
+    const entries = [];
+    for (const [word, raw] of Object.entries(value.words)) {
+      const valid =
+        Boolean(word) &&
+        word === normalizeAnswer(word) &&
+        word.length <= 100 &&
+        PROFILE_COUNTER_FIELDS.every(
+          (key) =>
+            Number.isSafeInteger(raw?.[key]) && raw[key] >= 0 && raw[key] <= PROFILE_COUNTER_MAX,
+        ) &&
+        Number.isSafeInteger(raw?.lastSeenAt) &&
+        raw.lastSeenAt >= 0;
+      if (!valid) {
+        if (strict) return null;
+        else continue;
+      }
+      entries.push([word, { ...raw }]);
+    }
+    if (strict && entries.length > 2000) return null;
+    entries.sort((a, b) => b[1].lastSeenAt - a[1].lastSeenAt || a[0].localeCompare(b[0]));
+    return { schema: 1, words: Object.fromEntries(entries.slice(0, 2000)) };
+  }
+
+  function usableProfile(value) {
+    return restoreWordProfile(value);
+  }
+
+  function create(cue, random = Math.random, difficulty = 'random', wordProfile = null) {
+    return createWithProfile(cue, random, difficulty, usableProfile(wordProfile));
+  }
+
+  function createTasks(cues, options = {}) {
+    const random = options.random ?? Math.random;
+    const difficulty = preferences(options).difficulty;
+    const gapFrequency = preferences(options).gapFrequency;
+    const stride = { dense: 1, normal: 2, sparse: 3 }[gapFrequency];
+    const wordProfile = usableProfile(options.wordProfile);
+    const previous = Array.isArray(options.previousTasks) ? options.previousTasks : [];
+    let eligible = 0;
+    return cues.map((cue, id) => {
+      const prior = previous[id];
+      const candidate = createWithProfile({ ...cue, id }, random, difficulty, wordProfile);
+      if (!candidate.answer) return candidate;
+      const keep = eligible++ % stride === 0;
+      if (prior && hasStarted(prior)) return { ...prior };
+      return keep ? candidate : { ...candidate, before: candidate.text, answer: null, after: '' };
+    });
+  }
+
+  function updateWordProfile(profile, previousTasks = [], nextTasks = [], now = Date.now()) {
+    const result = structuredClone(restoreWordProfile(profile));
+    const samePrompt = (a, b) =>
+      a?.id === b.id &&
+      a.start === b.start &&
+      a.end === b.end &&
+      a.text === b.text &&
+      normalizeAnswer(a.answer) === normalizeAnswer(b.answer);
+    const add = (value, amount) => Math.min(PROFILE_COUNTER_MAX, value + amount);
+    for (const [index, next] of nextTasks.entries()) {
+      const previous = previousTasks[index];
+      if (
+        !next?.answer ||
+        !finished(next) ||
+        (previous && samePrompt(previous, next) && finished(previous))
+      )
+        continue;
+      const key = normalizeAnswer(next.answer);
+      const entry = result.words[key] ?? {
+        attempts: 0,
+        clean: 0,
+        mistakes: 0,
+        hints: 0,
+        misses: 0,
+        lastSeenAt: 0,
+      };
+      entry.attempts = add(entry.attempts, 1);
+      entry.clean = add(
+        entry.clean,
+        next.status === 'correct' && next.mistakes === 0 && next.hints === 0 ? 1 : 0,
+      );
+      entry.mistakes = add(entry.mistakes, Math.min(5, next.mistakes));
+      entry.hints = add(entry.hints, next.hints);
+      entry.misses = add(entry.misses, ['skipped', 'revealed'].includes(next.status) ? 1 : 0);
+      entry.lastSeenAt = now;
+      result.words[key] = entry;
+    }
+    return restoreWordProfile(result);
+  }
+
+  function buildWordProfile(lessons) {
+    return [...lessons]
+      .sort((a, b) => a.updatedAt - b.updatedAt || a.videoId.localeCompare(b.videoId))
+      .reduce((profile, lesson) => updateWordProfile(profile, [], lesson.tasks, lesson.updatedAt), {
+        schema: 1,
+        words: {},
+      });
   }
 
   function normalizeCues(raw, rolling = true) {
@@ -240,9 +366,12 @@
         ? Math.min(max, Math.max(min, Number(value[key])))
         : fallback;
     return {
-      difficulty: ['easy', 'balanced', 'hard'].includes(value.difficulty)
+      difficulty: ['easy', 'balanced', 'hard', 'adaptive'].includes(value.difficulty)
         ? value.difficulty
         : 'balanced',
+      gapFrequency: ['dense', 'normal', 'sparse'].includes(value.gapFrequency)
+        ? value.gapFrequency
+        : 'dense',
       language: ['ru', 'en'].includes(value.language) ? value.language : 'auto',
       videoSize: ['small', 'medium', 'large'].includes(value.videoSize)
         ? value.videoSize
@@ -250,6 +379,7 @@
       fontSize: number('fontSize', 18, 14, 26),
       visibleRows: Math.round(number('visibleRows', 5, 3, 7)),
       autoPause: value.autoPause === true,
+      onboardingSeen: value.onboardingSeen === true,
     };
   }
 
@@ -309,6 +439,7 @@
         : 'auto',
       approximate: saved.approximate === true,
       difficulty: preferences(saved).difficulty,
+      gapFrequency: preferences(saved).gapFrequency,
       offset: Number.isFinite(saved.offset) ? Math.max(-30, Math.min(30, saved.offset)) : 0,
       position: Number.isFinite(saved.position) ? Math.max(0, Math.min(604800, saved.position)) : 0,
       updatedAt: Number(saved.updatedAt) || 0,
@@ -318,6 +449,13 @@
   const api = {
     matches,
     create,
+    createTasks,
+    restoreWordProfile,
+    updateWordProfile,
+    buildWordProfile,
+    normalizeAnswer,
+    hasStarted,
+    hasUserWork,
     normalizeCues,
     parseJson3,
     parseSubtitles,

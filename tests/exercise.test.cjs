@@ -2,6 +2,24 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const exercise = require('../exercise.js');
 
+const cue = (text, id = 0) => ({ id, start: id * 3, end: id * 3 + 2, text });
+const task = (overrides = {}) => ({
+  ...exercise.create(cue('Hello friend')),
+  ...overrides,
+});
+const session = (videoId, updatedAt, tasks) => ({
+  schema: 2,
+  videoId,
+  title: '',
+  sourceLabel: '',
+  sourceSelection: 'auto',
+  approximate: false,
+  offset: 0,
+  position: 0,
+  tasks,
+  updatedAt,
+});
+
 test('SRT and WebVTT import preserve fractional timing, decode text and ignore metadata', () => {
   assert.equal(typeof exercise.parseSubtitles, 'function');
   const srt =
@@ -211,4 +229,160 @@ test('caption normalization rejects broken timing and retains separated repeated
     cues.map((c) => c.id),
     [0, 1, 2],
   );
+});
+
+test('user work includes every destructive source-change case', () => {
+  const clean = { value: '', mistakes: 0, hints: 0, status: 'pending' };
+  assert.equal(exercise.hasUserWork([]), false);
+  assert.equal(exercise.hasUserWork([clean]), false);
+  for (const patch of [
+    { value: ' ' },
+    { mistakes: 1 },
+    { hints: 1 },
+    { status: 'wrong' },
+    { status: 'correct', value: 'word', answer: 'word' },
+    { status: 'assisted', value: 'word', answer: 'word' },
+    { status: 'skipped', value: 'word', answer: 'word' },
+    { status: 'revealed', value: 'word', answer: 'word' },
+  ])
+    assert.equal(exercise.hasUserWork([{ ...clean, ...patch }]), true);
+});
+
+test('legacy sessions retain exact tasks and default to balanced dense', () => {
+  const legacyTask = task({
+    text: 'Hello friend',
+    before: 'Hello ',
+    answer: 'friend',
+    after: '',
+    value: 'fri',
+  });
+  const legacySession = session('legacy01', 10, [legacyTask]);
+  delete legacySession.difficulty;
+  delete legacySession.gapFrequency;
+  const restored = exercise.restoreSession(legacySession, legacySession.videoId);
+  assert.equal(restored.difficulty, 'balanced');
+  assert.equal(restored.gapFrequency, 'dense');
+  assert.equal(restored.tasks[0].answer, 'friend');
+  assert.equal(restored.tasks[0].value, 'fri');
+});
+
+test('gap frequency counts only eligible cues and starts with the first', () => {
+  const cues = [
+    cue('Alpha one'),
+    cue('[Music]'),
+    cue('Bravo two'),
+    cue('Charlie three'),
+    cue('Delta four'),
+    cue('Echo five'),
+    cue('Foxtrot six'),
+    cue('Golf seven'),
+  ];
+  assert.equal(
+    exercise.createTasks(cues, { random: () => 0, gapFrequency: 'dense' }).filter((t) => t.answer)
+      .length,
+    7,
+  );
+  assert.equal(
+    exercise.createTasks(cues, { random: () => 0, gapFrequency: 'normal' }).filter((t) => t.answer)
+      .length,
+    4,
+  );
+  assert.equal(
+    exercise.createTasks(cues, { random: () => 0, gapFrequency: 'sparse' }).filter((t) => t.answer)
+      .length,
+    3,
+  );
+});
+
+test('rebuild preserves every started task byte-for-byte', () => {
+  const startedVariants = [
+    task({ value: 'draft' }),
+    task({ mistakes: 1 }),
+    task({ hints: 1 }),
+    task({ status: 'wrong' }),
+    task({ status: 'correct', value: 'word' }),
+  ];
+  const previousTasks = startedVariants.map((task, id) => ({ ...task, id }));
+  const rebuilt = exercise.createTasks(previousTasks, {
+    random: () => 0.99,
+    difficulty: 'hard',
+    gapFrequency: 'sparse',
+    previousTasks,
+  });
+  for (const previous of previousTasks) {
+    if (exercise.hasStarted(previous)) assert.deepEqual(rebuilt[previous.id], previous);
+  }
+});
+
+test('adaptive uses balanced pool and deterministic cumulative weights', () => {
+  const profile = {
+    schema: 1,
+    words: {
+      difficult: { attempts: 3, clean: 0, mistakes: 5, hints: 1, misses: 1, lastSeenAt: 10 },
+      ordinary: { attempts: 5, clean: 5, mistakes: 0, hints: 0, misses: 0, lastSeenAt: 9 },
+    },
+  };
+  assert.equal(
+    exercise.create(cue('the difficult ordinary'), () => 0.7, 'adaptive', profile).answer,
+    'difficult',
+  );
+  assert.equal(exercise.normalizeAnswer(' Don’t '), "don't");
+});
+
+test('profile counts only unfinished-to-finished transitions and caps one task at five mistakes', () => {
+  const pending = task({ answer: 'Don’t', value: '', status: 'pending' });
+  const corrected = task({
+    answer: "Don't",
+    value: "don't",
+    status: 'correct',
+    mistakes: 6,
+    hints: 0,
+  });
+  const once = exercise.updateWordProfile(null, [pending], [corrected], 100);
+  assert.deepEqual(once.words["don't"], {
+    attempts: 1,
+    clean: 0,
+    mistakes: 5,
+    hints: 0,
+    misses: 0,
+    lastSeenAt: 100,
+  });
+  assert.deepEqual(exercise.updateWordProfile(once, [corrected], [corrected], 200), once);
+});
+
+test('word profiles tolerate corrupt working data, reject malformed backups, and retain 2,000 newest entries', () => {
+  assert.deepEqual(exercise.restoreWordProfile(null), { schema: 1, words: {} });
+  assert.equal(exercise.restoreWordProfile({ schema: 1, words: [] }, true), null);
+  assert.equal(
+    exercise.restoreWordProfile(
+      {
+        schema: 1,
+        words: {
+          invalid: { attempts: -1, clean: 0, mistakes: 0, hints: 0, misses: 0, lastSeenAt: 0 },
+        },
+      },
+      true,
+    ),
+    null,
+  );
+  const entries = Object.fromEntries(
+    Array.from({ length: 2001 }, (_, index) => [
+      `word${String(index).padStart(4, '0')}`,
+      { attempts: 0, clean: 0, mistakes: 0, hints: 0, misses: 0, lastSeenAt: index },
+    ]),
+  );
+  const restored = exercise.restoreWordProfile({ schema: 1, words: entries });
+  assert.equal(Object.keys(restored.words).length, 2000);
+  assert.equal(restored.words.word0000, undefined);
+  assert.ok(restored.words.word2000);
+});
+
+test('word profile builds lessons in update order', () => {
+  const finishedTask = (answer) => task({ answer, value: answer, status: 'correct' });
+  const profile = exercise.buildWordProfile([
+    { videoId: 'z', updatedAt: 20, tasks: [finishedTask('Second')] },
+    { videoId: 'a', updatedAt: 10, tasks: [finishedTask('First')] },
+  ]);
+  assert.equal(profile.words.first.lastSeenAt, 10);
+  assert.equal(profile.words.second.lastSeenAt, 20);
 });
