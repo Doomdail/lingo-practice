@@ -1,0 +1,11 @@
+{
+  "extensionName": { "message": "Lingo Practice — YouTube" },
+  "extensionDescription": {
+    "message": "Слушайте видео YouTube и вписывайте пропущенные слова в субтитрах."
+  },
+  "actionTitle": { "message": "Включить / выключить Lingo Practice" },
+  "openYouTubeTitle": { "message": "Откройте обычное видео на youtube.com и нажмите ещё раз" },
+  "activationFailureTitle": {
+    "message": "Не удалось запустить. Обновите страницу YouTube и попробуйте ещё раз."
+  }
+}

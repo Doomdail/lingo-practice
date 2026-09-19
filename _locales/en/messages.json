@@ -1,0 +1,9 @@
+{
+  "extensionName": { "message": "Lingo Practice — YouTube" },
+  "extensionDescription": {
+    "message": "Listen to YouTube videos and fill in missing words in the subtitles."
+  },
+  "actionTitle": { "message": "Toggle Lingo Practice" },
+  "openYouTubeTitle": { "message": "Open a regular video on youtube.com and try again" },
+  "activationFailureTitle": { "message": "Could not start. Reload the YouTube page and try again." }
+}
