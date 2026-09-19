@@ -34,10 +34,37 @@ const modernViewModel = {
 const cyclicUnknownModel = { content: { kind: 'future-transcript-model' } };
 cyclicUnknownModel.content.parent = cyclicUnknownModel;
 
+function deepRendererModel(objectCount, withCue) {
+  const root = {};
+  let current = root;
+  for (let index = 1; index < objectCount; index++) {
+    current.child = {};
+    current = current.child;
+  }
+  if (withCue)
+    current.transcriptSegmentRenderer = {
+      startMs: '1000',
+      endMs: '2000',
+      snippet: { simpleText: 'Boundary cue' },
+    };
+  return root;
+}
+
+function rendererCues(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    transcriptSegmentRenderer: {
+      startMs: String(index * 1000),
+      endMs: String(index * 1000 + 500),
+      snippet: { simpleText: `Cue ${index}` },
+    },
+  }));
+}
+
 function makePageContext(options) {
   let href = 'https://www.youtube.com/watch?v=safe01';
   let waitCount = 0;
   let openerClicked = false;
+  let rootPresent = !options.removeRoot;
   const video = { duration: 20 };
   const captionTracks =
     options.tracks === undefined
@@ -106,7 +133,7 @@ function makePageContext(options) {
       return [];
     },
     getElementById(id) {
-      return id === 'lingo-practice-root' && !options.removeRoot ? {} : null;
+      return id === 'lingo-practice-root' && rootPresent ? {} : null;
     },
   };
   const location = {
@@ -125,7 +152,20 @@ function makePageContext(options) {
     window: { ytInitialPlayerResponse: options.initialResponse },
     async fetch() {
       if (options.fetchError) throw options.fetchError;
-      return options.fetch ?? response(200, '');
+      const fetched = options.fetch ?? response(200, '');
+      if (options.changeVideoAfterFetch) href = 'https://www.youtube.com/watch?v=private-other-id';
+      if (options.removeRootAfterFetch) rootPresent = false;
+      return {
+        status: fetched.status,
+        ok: fetched.ok,
+        async text() {
+          const body = await fetched.text();
+          if (options.changeVideoAfterBody)
+            href = 'https://www.youtube.com/watch?v=private-other-id';
+          if (options.removeRootAfterBody) rootPresent = false;
+          return body;
+        },
+      };
     },
     setTimeout(resolve) {
       waitCount += 1;
@@ -188,6 +228,63 @@ test('selected track failures use a stable privacy-safe contract', async () => {
     assert.equal(serialized.includes(secret), false, `failure leaked ${secret}`);
 });
 
+test('diagnostic primitives reject page-owned objects, URLs and oversized strings', async () => {
+  for (const languageCode of [
+    { secret: 'PRIVATE_OBJECT_LANGUAGE' },
+    'https://private.test/language?token=PRIVATE_QUERY',
+    `en-${'PRIVATE_OVERSIZED'.repeat(20)}`,
+  ]) {
+    const result = await run({
+      trackIndex: 0,
+      tracks: [
+        {
+          languageCode,
+          name: { simpleText: 'Safe label' },
+          baseUrl: 'https://www.youtube.com/api/timedtext',
+        },
+      ],
+      fetchError: namedError('NetworkError'),
+    });
+    assert.equal(result.diagnostic.tracks.selectedLanguage, null);
+    assert.equal(JSON.stringify(result).includes('PRIVATE_'), false);
+  }
+
+  const malformedTracks = {
+    length: { secret: 'PRIVATE_TRACK_COUNT' },
+    findIndex() {
+      return -1;
+    },
+  };
+  const malformedResult = await run({ tracks: malformedTracks });
+  assert.equal(malformedResult.diagnostic.tracks.count, 0);
+  assert.equal(JSON.stringify(malformedResult).includes('PRIVATE_TRACK_COUNT'), false);
+
+  const statusResult = await run({
+    fetch: {
+      status: { secret: 'PRIVATE_STATUS' },
+      ok: false,
+      async text() {
+        return '';
+      },
+    },
+  });
+  assert.equal(statusResult.diagnostic.timedText.httpStatus, null);
+  assert.equal(JSON.stringify(statusResult).includes('PRIVATE_STATUS'), false);
+
+  const valid = await run({
+    trackIndex: 0,
+    tracks: [
+      {
+        languageCode: 'zh-Hant-TW',
+        name: { simpleText: 'Safe label' },
+        baseUrl: 'https://www.youtube.com/api/timedtext',
+      },
+    ],
+    fetchError: namedError('NetworkError'),
+  });
+  assert.equal(valid.diagnostic.tracks.selectedLanguage, 'zh-Hant-TW');
+});
+
 test('unsupported caption URLs are classified without fetching them', async () => {
   let fetched = false;
   const context = makePageContext({
@@ -244,6 +341,58 @@ test('transcript walk is bounded and classifies known and unknown models', async
   assert.equal(unknown.diagnostic.transcript.cueCount, 0);
 });
 
+test('transcript traversal handles deep models at and beyond the object limit', async () => {
+  const deep = await run({ action: 'transcript', panel: deepRendererModel(12_000, true) });
+  assert.equal(deep.error, undefined);
+  assert.equal(deep.cues[0].text, 'Boundary cue');
+
+  const exact = await run({ action: 'transcript', panel: deepRendererModel(50_000, true) });
+  assert.equal(exact.error, undefined);
+  assert.equal(exact.diagnostic.transcript.cueCount, 1);
+
+  const over = await run({ action: 'transcript', panel: deepRendererModel(50_001, true) });
+  assert.equal(over.error.code, 'TRANSCRIPT_ENTRY_MISSING');
+  assert.equal(over.diagnostic.transcript.cueCount, 0);
+});
+
+test('wide traversal and cue limits stop before out-of-budget getters', async () => {
+  const wide = {};
+  for (let index = 0; index < 50_000; index++) wide[`child${index}`] = {};
+  Object.defineProperty(wide, 'afterBudget', {
+    enumerable: true,
+    get() {
+      throw new Error('OUT_OF_BUDGET_WIDE_GETTER');
+    },
+  });
+  const wideResult = await run({ action: 'transcript', panel: wide });
+  assert.equal(wideResult.error.code, 'TRANSCRIPT_ENTRY_MISSING');
+
+  const exactCues = await run({ action: 'transcript', panel: rendererCues(5_000) });
+  assert.equal(exactCues.cues.length, 5_000);
+  assert.equal(exactCues.diagnostic.transcript.cueCount, 5_000);
+
+  const overCues = rendererCues(5_000);
+  Object.defineProperty(overCues, '5000', {
+    enumerable: true,
+    get() {
+      throw new Error('OUT_OF_BUDGET_CUE_GETTER');
+    },
+  });
+  const capped = await run({ action: 'transcript', panel: overCues });
+  assert.equal(capped.cues.length, 5_000);
+  assert.equal(capped.diagnostic.transcript.cueCount, 5_000);
+});
+
+test('DOM transcript rows remain the fallback when no panel model has cues', async () => {
+  const result = await run({
+    action: 'transcript',
+    rows: [{ data: legacyRenderer.transcriptSegmentRenderer }],
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.cues[0].text, 'Legacy cue');
+  assert.equal(result.diagnostic.transcript.model, 'renderer');
+});
+
 test('video change during wait returns LOAD_CANCELLED without stale cues', async () => {
   const result = await run({
     action: 'transcript',
@@ -253,4 +402,21 @@ test('video change during wait returns LOAD_CANCELLED without stale cues', async
   assert.equal(result.error.code, 'LOAD_CANCELLED');
   assert.equal(result.diagnostic.page.videoMatches, false);
   assert.equal('cues' in result, false);
+});
+
+test('load context changes cancel fetch, body, initial transcript and fallback races', async () => {
+  const speech = JSON.stringify({ events: [{ segs: [{ utf8: 'Stale cue' }] }] });
+  const cases = [
+    { fetch: response(200, speech), changeVideoAfterFetch: true },
+    { fetch: response(200, speech), changeVideoAfterBody: true },
+    { fetch: response(200, speech), removeRootAfterFetch: true },
+    { fetch: response(200, ''), removeRootAfterBody: true, panel: legacyRenderer },
+    { action: 'transcript', removeRoot: true, panel: legacyRenderer },
+  ];
+  for (const options of cases) {
+    const result = await run(options);
+    assert.equal(result.error.code, 'LOAD_CANCELLED');
+    assert.equal('json' in result, false);
+    assert.equal('cues' in result, false);
+  }
 });

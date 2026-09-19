@@ -49,6 +49,14 @@ async function lingoYouTube(action, options) {
         'player',
         true,
       );
+    const cancellation = (stage) => {
+      diagnostic.page.videoMatches = currentId() === options.videoId;
+      return !diagnostic.page.videoMatches || !document.getElementById('lingo-practice-root')
+        ? failure('LOAD_CANCELLED', 'Загрузка отменена.', stage, false)
+        : null;
+    };
+    let cancelled = cancellation('load');
+    if (cancelled) return cancelled;
 
     const response = player.getPlayerResponse?.();
     const initial = window.ytInitialPlayerResponse;
@@ -66,7 +74,8 @@ async function lingoYouTube(action, options) {
         true,
       );
 
-    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+    const captionTracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    const tracks = Array.isArray(captionTracks) ? captionTracks : [];
     diagnostic.tracks.count = tracks.length;
     if (action === 'tracks')
       return {
@@ -93,7 +102,13 @@ async function lingoYouTube(action, options) {
         : Math.max(0, preferredManual >= 0 ? preferredManual : preferredEnglish);
       const track = tracks[selected];
       if (track) {
-        diagnostic.tracks.selectedLanguage = track.languageCode ?? null;
+        const language = track.languageCode;
+        diagnostic.tracks.selectedLanguage =
+          typeof language === 'string' &&
+          language.length <= 64 &&
+          /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(language)
+            ? language
+            : null;
         diagnostic.tracks.selectedAutomatic = track.kind === 'asr';
         let url;
         try {
@@ -117,8 +132,17 @@ async function lingoYouTube(action, options) {
               credentials: 'include',
               signal: AbortSignal.timeout(8000),
             });
-            diagnostic.timedText.httpStatus = timedText.status;
+            cancelled = cancellation('timedtext');
+            if (cancelled) return cancelled;
+            diagnostic.timedText.httpStatus =
+              Number.isInteger(timedText.status) &&
+              timedText.status >= 100 &&
+              timedText.status <= 599
+                ? timedText.status
+                : null;
             const text = await timedText.text();
+            cancelled = cancellation('timedtext');
+            if (cancelled) return cancelled;
             if (!timedText.ok) diagnostic.timedText.outcome = 'http-error';
             else if (!text.trim()) diagnostic.timedText.outcome = 'empty';
             else {
@@ -132,6 +156,8 @@ async function lingoYouTube(action, options) {
                       event.segs.some((segment) => segment?.utf8?.trim()),
                   );
                 if (hasSpeech) {
+                  cancelled = cancellation('timedtext');
+                  if (cancelled) return cancelled;
                   diagnostic.timedText.outcome = 'success';
                   return {
                     json,
@@ -151,6 +177,8 @@ async function lingoYouTube(action, options) {
           }
         }
       }
+      cancelled = cancellation('timedtext');
+      if (cancelled) return cancelled;
       if (Number.isInteger(options.trackIndex))
         return failure(
           'TRACK_FETCH_FAILED',
@@ -168,7 +196,11 @@ async function lingoYouTube(action, options) {
       const raw = [];
       let approximate = false,
         visited = 0,
+        enumerated = 0,
         model = 'none';
+      const seen = new WeakSet();
+      const exhausted = () =>
+        visited >= MAX_VISITED || enumerated >= MAX_VISITED || raw.length >= MAX_CUES;
       const observe = (variant) => {
         if (model === 'none') model = variant;
         else if (model !== variant) model = 'mixed';
@@ -191,27 +223,39 @@ async function lingoYouTube(action, options) {
         });
         approximate = true;
       };
-      const walk = (value, seen = new WeakSet()) => {
-        if (
-          !value ||
-          typeof value !== 'object' ||
-          seen.has(value) ||
-          visited++ >= MAX_VISITED ||
-          raw.length >= MAX_CUES
-        )
-          return;
-        seen.add(value);
-        if (value.transcriptSegmentRenderer) {
-          observe('renderer');
-          pushRenderer(value);
-          return;
+      const children = function* (value) {
+        for (const key in value) {
+          if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+          if (enumerated >= MAX_VISITED) return;
+          enumerated++;
+          yield value[key];
         }
-        if (value.transcriptSegmentViewModel) {
-          observe('view-model');
-          pushViewModel(value);
-          return;
+      };
+      const walk = (root) => {
+        const stack = [{ value: root }];
+        while (stack.length && !exhausted()) {
+          const frame = stack.pop();
+          if (frame.iterator) {
+            const child = frame.iterator.next();
+            if (!child.done) stack.push(frame, { value: child.value });
+            continue;
+          }
+          const value = frame.value;
+          if (!value || typeof value !== 'object' || seen.has(value)) continue;
+          seen.add(value);
+          visited++;
+          if (value.transcriptSegmentRenderer) {
+            observe('renderer');
+            pushRenderer(value);
+            continue;
+          }
+          if (value.transcriptSegmentViewModel) {
+            observe('view-model');
+            pushViewModel(value);
+            continue;
+          }
+          stack.push({ iterator: children(value) });
         }
-        for (const child of Object.values(value)) walk(child, seen);
       };
 
       const newlyExpanded = includeNewPanels
@@ -222,6 +266,7 @@ async function lingoYouTube(action, options) {
           ])
         : new Set();
       for (const panel of document.querySelectorAll(PANEL_SELECTOR)) {
+        if (exhausted()) break;
         const knownModel = Boolean(panel.querySelector(MODEL_SELECTOR));
         const unknownNewPanel =
           includeNewPanels && newlyExpanded.has(panel) && !expanded.has(panel) && !knownModel;
@@ -229,9 +274,11 @@ async function lingoYouTube(action, options) {
         if (unknownNewPanel) unknownModelObserved = true;
         walk(panel.data);
       }
-      if (!raw.length) {
+      if (!raw.length && !exhausted()) {
         for (const row of document.querySelectorAll(ROW_SELECTOR)) {
-          if (!row.data || raw.length >= MAX_CUES) continue;
+          if (exhausted()) break;
+          visited++;
+          if (!row.data) continue;
           observe('renderer');
           pushRenderer({ transcriptSegmentRenderer: row.data });
         }
@@ -263,7 +310,11 @@ async function lingoYouTube(action, options) {
       };
     };
 
+    cancelled = cancellation('transcript');
+    if (cancelled) return cancelled;
     let result = readTranscript();
+    cancelled = cancellation('transcript');
+    if (cancelled) return cancelled;
     if (result.cues.length)
       return {
         ...result,
@@ -285,17 +336,17 @@ async function lingoYouTube(action, options) {
         `${PANEL_SELECTOR}[visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"]`,
       ),
     ]);
+    cancelled = cancellation('transcript-entry');
+    if (cancelled) return cancelled;
     button.click();
-    const loadCancelled = () => {
-      diagnostic.page.videoMatches = currentId() === options.videoId;
-      return !diagnostic.page.videoMatches || !document.getElementById('lingo-practice-root');
-    };
     try {
       for (let attempt = 0; attempt < 24; attempt++) {
         diagnostic.transcript.attempts = attempt + 1;
-        if (loadCancelled())
-          return failure('LOAD_CANCELLED', 'Загрузка отменена.', 'transcript-wait', false);
+        cancelled = cancellation('transcript-wait');
+        if (cancelled) return cancelled;
         result = readTranscript(true);
+        cancelled = cancellation('transcript-wait');
+        if (cancelled) return cancelled;
         if (result.cues.length)
           return {
             ...result,
@@ -303,8 +354,8 @@ async function lingoYouTube(action, options) {
             diagnostic,
           };
         await new Promise((resolve) => setTimeout(resolve, 250));
-        if (loadCancelled())
-          return failure('LOAD_CANCELLED', 'Загрузка отменена.', 'transcript-wait', false);
+        cancelled = cancellation('transcript-wait');
+        if (cancelled) return cancelled;
       }
     } finally {
       if (currentId() === options.videoId) {
