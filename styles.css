@@ -226,6 +226,17 @@ h1 {
 .retry {
   align-self: flex-start;
 }
+.diagnostic-report {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 12rem;
+  resize: vertical;
+  color: #edf1f7;
+  background: #101b17;
+  border: 1px solid #496052;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
 .cue-list {
   position: relative;
   overflow-y: auto;

@@ -15,18 +15,19 @@ Practice listening with YouTube videos. Fill in missing words, replay a line, an
 - Adjustable difficulty, subtitle timing, video size, text size, and visible lines.
 - Local progress for each video, with protection against conflicting saves from another tab.
 - English and Russian interface, selected automatically or manually.
+- A lesson library, difficult-word list, CSV export, and local JSON backup and restore.
 
 No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download `lingo-practice-0.4.0.zip` from [Releases](https://github.com/Doomdail/lingo-practice/releases).
+1. Download `lingo-practice-0.4.1.zip` from [Releases](https://github.com/Doomdail/lingo-practice/releases).
 2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The 0.4.0 package should appear as **0.4.0** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The 0.4.1 package should appear as **0.4.1** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
 
 ## Use
 
@@ -64,6 +65,8 @@ The subtitle offset ranges from **−30 to +30 seconds**, in 0.1-second steps. *
 
 If loading fails, exit practice, expand the video's description, open **Show transcript**, and wait for its text. Start practice again and select **YouTube transcript**, or import a subtitle file.
 
+If a caption request fails, **Copy diagnostics** creates a short report with an error code and technical availability flags. It does not include the video address, title, caption text, answers, or file names. Review the report before sharing it. If clipboard access is blocked, a dialog lets you select and copy the text manually. The current lesson remains available after a failed source change.
+
 **Open SRT/VTT** accepts a UTF-8 `.srt` or `.vtt` file with these limits:
 
 - 2 MB, meaning **2,000,000 bytes**.
@@ -79,9 +82,11 @@ The extension stores one lesson per video and your settings in `chrome.storage.l
 
 The footer shows save status and storage errors. If another tab has newer progress, reopen practice in the older tab to load it. Old lessons do not expire automatically, and progress is not synced between devices.
 
+Open **My lessons** from the extension's library button or the extension's options page. You can resume or delete individual lessons, search and sort difficult words, and download a CSV word list. **Export backup** downloads a local JSON file containing captions and answers. **Import backup** previews changes before applying them; importing settings is optional. **Delete all data** removes lessons, word statistics, and settings from this browser profile. Keep backup files private and delete them separately when no longer needed.
+
 `activeTab` and `scripting` allow access to the current tab after you click the icon; `storage` saves progress locally. There is no analytics or developer-operated service. Caption requests go to YouTube in the current page's context, and YouTube's normal playback and network activity continue.
 
-Removing the extension deletes its saved local data. Exiting practice or disabling the extension does not. See the [Privacy Policy](PRIVACY.md) for details.
+Removing the extension or using **Delete all data** clears its saved local data. Exiting practice or disabling the extension does not. See the [Privacy Policy](PRIVACY.md) for details.
 
 ## Compatibility
 

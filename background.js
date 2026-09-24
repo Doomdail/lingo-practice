@@ -62,6 +62,29 @@ const isLessonSender = (message, sender) =>
   /^[\w-]{1,64}$/.test(message.videoId);
 const isOpenLibrarySender = (message, sender) =>
   message?.type === 'LINGO_OPEN_LIBRARY' && isLessonPageSender(sender);
+const emptyCaptionDiagnostic = (message) => ({
+  schema: 1,
+  requestedSource:
+    message.action === 'transcript'
+      ? 'transcript'
+      : Number.isInteger(message.trackIndex)
+        ? 'track'
+        : 'auto',
+  page: {
+    watchPage: true,
+    playerFound: false,
+    videoFound: false,
+    responseFound: false,
+    videoMatches: false,
+  },
+  tracks: { count: 0, selectedLanguage: null, selectedAutomatic: null },
+  timedText: { outcome: 'not-attempted', httpStatus: null },
+  transcript: { model: 'none', openerFound: false, attempts: 0, cueCount: 0 },
+});
+const captionFailure = (message, code, messageKey) => ({
+  error: { code, messageKey, stage: 'main-world', retryable: true },
+  diagnostic: emptyCaptionDiagnostic(message),
+});
 
 function enqueue(operation, sendResponse) {
   const result = storageQueue.then(operation);
@@ -402,11 +425,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })
     .then((results) =>
       sendResponse(
-        results[0]?.result ?? { error: 'Проигрыватель не ответил. Повторите загрузку.' },
+        results[0]?.result ??
+          captionFailure(message, 'MAIN_WORLD_NO_RESULT', 'Проигрыватель не ответил. Повторите загрузку.'),
       ),
     )
     .catch(() =>
-      sendResponse({ error: 'Страница изменилась. Закройте режим и включите его снова.' }),
+      sendResponse(
+        captionFailure(message, 'PAGE_CONTEXT_CHANGED', 'Страница изменилась. Закройте режим и включите его снова.'),
+      ),
     );
   return true;
 });

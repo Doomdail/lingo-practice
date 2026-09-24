@@ -232,6 +232,15 @@
       'YouTube did not load the subtitles. Try opening the transcript manually or choose another video.',
     'Не удалось прочитать субтитры. Обновите страницу и повторите попытку.':
       'Could not read the subtitles. Reload the page and try again.',
+    'YouTube использует неизвестный формат расшифровки. Повторите попытку позже.':
+      'YouTube uses an unknown transcript format. Try again later.',
+    'Скопировать диагностику': 'Copy diagnostics',
+    'Диагностика субтитров': 'Caption diagnostics',
+    'Текст диагностики': 'Diagnostic text',
+    'Скопируйте этот текст вручную. Он не содержит адрес видео, субтитры и ответы.':
+      'Copy this text manually. It does not include the video address, captions or answers.',
+    'Закрыть диагностику': 'Close diagnostics',
+    'Диагностика скопирована.': 'Diagnostics copied.',
   };
 
   function resolve(language, browserLanguage) {

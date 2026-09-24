@@ -43,7 +43,8 @@
     wordProfile = { schema: 1, words: {} };
   let noticeState = 'loading',
     noticeMessage = '',
-    adPlaying = false;
+    adPlaying = false,
+    lastCaptionFailure = null;
   const i18n = globalThis.LingoI18n;
   const language = () => i18n.resolve(prefs.language, navigator.language);
   const t = (key, parameters) => i18n.text(key, parameters, language());
@@ -155,6 +156,8 @@
     load(failedSelection ?? select.value),
   );
   retry.hidden = true;
+  const diagnosticButton = button('Скопировать диагностику', 'secondary retry', copyDiagnostics);
+  diagnosticButton.hidden = true;
   const reviewBar = el('div', 'review-bar');
   reviewBar.hidden = true;
   const reviewLabel = el('span');
@@ -188,6 +191,7 @@
     notice,
     adStatus,
     retry,
+    diagnosticButton,
     reviewBar,
     list,
     footer,
@@ -311,7 +315,20 @@
     helpSteps,
     button('Закрыть', 'primary', () => helpDialog.close('closed')),
   );
-  shadow.append(settingsDialog, summaryDialog, sourceDialog, helpDialog);
+  const diagnosticDialog = el('dialog', 'modal diagnostic-dialog');
+  const diagnosticTitle = el('h2', '', 'Диагностика субтитров');
+  diagnosticTitle.id = 'caption-diagnostic-title';
+  diagnosticDialog.setAttribute('aria-labelledby', diagnosticTitle.id);
+  const diagnosticTextarea = el('textarea', 'diagnostic-report');
+  diagnosticTextarea.readOnly = true;
+  setAttr(diagnosticTextarea, 'aria-label', 'Текст диагностики');
+  diagnosticDialog.append(
+    diagnosticTitle,
+    el('p', '', 'Скопируйте этот текст вручную. Он не содержит адрес видео, субтитры и ответы.'),
+    diagnosticTextarea,
+    button('Закрыть диагностику', 'primary', () => diagnosticDialog.close()),
+  );
+  shadow.append(settingsDialog, summaryDialog, sourceDialog, helpDialog, diagnosticDialog);
   listen(languageSelect, 'change', () => {
     prefs.language = languageSelect.value;
     preferenceChanges.language = prefs.language;
@@ -392,6 +409,7 @@
     if (sourceDialog.open) sourceDialog.close('cancel');
     sourceConfirmation?.(false);
     if (helpDialog.open) helpDialog.close('closed');
+    if (diagnosticDialog.open) diagnosticDialog.close();
     if (settingsDialog.open) settingsDialog.close();
     if (summaryDialog.open) summaryDialog.close();
     if (!onboardingSaved) saveNow();
@@ -410,15 +428,130 @@
     window.dispatchEvent(new Event('resize'));
   }
   async function request(action, trackIndex) {
-    const result = await chrome.runtime.sendMessage({
-      type: 'LINGO_YOUTUBE',
-      action,
-      videoId,
-      trackIndex,
-    });
-    if (result?.error) throw new Error(result.error);
-    if (!result) throw new Error('Расширение не ответило. Обновите страницу YouTube.');
+    let result;
+    try {
+      result = await chrome.runtime.sendMessage({
+        type: 'LINGO_YOUTUBE',
+        action,
+        videoId,
+        trackIndex,
+      });
+    } catch {
+      // Runtime errors can include page data; only the stable code is copied.
+    }
+    if (!result)
+      throw Object.assign(new Error(t('Расширение не ответило. Обновите страницу YouTube.')), {
+        failure: { code: 'NO_RESPONSE', stage: 'extension', retryable: true },
+        diagnostic: {
+          requestedSource: action === 'transcript' ? 'transcript' : Number.isInteger(trackIndex) ? 'track' : 'auto',
+        },
+      });
+    if (result.error) {
+      if (typeof result.error === 'string') throw new Error(result.error);
+      const failure = result.error;
+      const messages = {
+        VIDEO_CHANGED: 'Открыто другое видео.',
+        PLAYER_NOT_READY: 'Проигрыватель ещё не загрузился. Повторите попытку.',
+        PLAYER_RESPONSE_STALE: 'Дождитесь загрузки нового видео.',
+        TRACK_FETCH_FAILED:
+          'YouTube не отдал эту дорожку. Выберите «Расшифровка YouTube» или «Автоматически».',
+        TRANSCRIPT_ENTRY_MISSING:
+          'Субтитры недоступны. Откройте «Показать текст видео» в описании YouTube и повторите загрузку.',
+        TRANSCRIPT_TIMEOUT:
+          'YouTube не загрузил текст субтитров. Попробуйте открыть расшифровку вручную или выбрать другое видео.',
+        TRANSCRIPT_UNKNOWN_MODEL:
+          'YouTube использует неизвестный формат расшифровки. Повторите попытку позже.',
+        LOAD_CANCELLED: 'Загрузка отменена.',
+        CAPTION_READ_FAILED: 'Не удалось прочитать субтитры. Обновите страницу и повторите попытку.',
+        MAIN_WORLD_NO_RESULT: 'Проигрыватель не ответил. Повторите загрузку.',
+        PAGE_CONTEXT_CHANGED: 'Страница изменилась. Закройте режим и включите его снова.',
+      };
+      const code = Object.hasOwn(messages, failure.code) ? failure.code : 'CAPTION_READ_FAILED';
+      throw Object.assign(new Error(t(messages[code])), {
+        failure: { code, stage: failure.stage, retryable: failure.retryable === true },
+        diagnostic: result.diagnostic,
+      });
+    }
     return result;
+  }
+  function clearCaptionFailure() {
+    lastCaptionFailure = null;
+    diagnosticButton.hidden = true;
+    if (diagnosticDialog.open) diagnosticDialog.close();
+  }
+  function buildDiagnosticReport({ failure, diagnostic }) {
+    const allowed = (value, values, fallback) => values.includes(value) ? value : fallback;
+    const count = (value, max) =>
+      Number.isSafeInteger(value) && value >= 0 && value <= max ? value : null;
+    const languageCode = diagnostic?.tracks?.selectedLanguage;
+    return JSON.stringify(
+      {
+        schema: 1,
+        extensionVersion: chrome.runtime.getManifest().version,
+        uiLanguage: language(),
+        error: {
+          code: failure.code,
+          stage: allowed(failure.stage, [
+            'page','player','player-response','load','timedtext','transcript',
+            'transcript-entry','transcript-wait','transcript-model','caption-read',
+            'main-world','extension',
+          ], 'unknown'),
+          retryable: failure.retryable === true,
+        },
+        diagnostic: {
+          schema: 1,
+          requestedSource: allowed(diagnostic?.requestedSource, ['auto','track','transcript'], 'auto'),
+          page: {
+            watchPage: diagnostic?.page?.watchPage === true,
+            playerFound: diagnostic?.page?.playerFound === true,
+            videoFound: diagnostic?.page?.videoFound === true,
+            responseFound: diagnostic?.page?.responseFound === true,
+            videoMatches: diagnostic?.page?.videoMatches === true,
+          },
+          tracks: {
+            count: count(diagnostic?.tracks?.count, 5000),
+            selectedLanguage:
+              typeof languageCode === 'string' &&
+              languageCode.length <= 64 &&
+              /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(languageCode)
+                ? languageCode
+                : null,
+            selectedAutomatic:
+              typeof diagnostic?.tracks?.selectedAutomatic === 'boolean'
+                ? diagnostic.tracks.selectedAutomatic
+                : null,
+          },
+          timedText: {
+            outcome: allowed(diagnostic?.timedText?.outcome, [
+              'not-attempted','success','http-error','empty','invalid-json','timeout',
+              'network-error','unsupported-url',
+            ], 'not-attempted'),
+            httpStatus: count(diagnostic?.timedText?.httpStatus, 599),
+          },
+          transcript: {
+            model: allowed(diagnostic?.transcript?.model, ['none','renderer','view-model','mixed'], 'none'),
+            openerFound: diagnostic?.transcript?.openerFound === true,
+            attempts: count(diagnostic?.transcript?.attempts, 24),
+            cueCount: count(diagnostic?.transcript?.cueCount, 5000),
+          },
+        },
+      },
+      null,
+      2,
+    );
+  }
+  async function copyDiagnostics() {
+    if (!lastCaptionFailure) return;
+    const report = buildDiagnosticReport(lastCaptionFailure);
+    try {
+      await navigator.clipboard.writeText(report);
+      announce('Диагностика скопирована.');
+    } catch {
+      diagnosticTextarea.value = report;
+      showDialog(diagnosticDialog, diagnosticButton);
+      diagnosticTextarea.focus();
+      diagnosticTextarea.select();
+    }
   }
   const captionTime = () => video.currentTime - offset;
   const isAd = () =>
@@ -807,6 +940,7 @@
     const file = fileInput.files?.[0];
     if (!file) return;
     const ticket = ++revision;
+    clearCaptionFailure();
     setSourceBusy(true);
     retry.hidden = true;
     try {
@@ -829,6 +963,7 @@
       return;
     }
     const ticket = ++revision;
+    clearCaptionFailure();
     setSourceBusy(true);
     retry.hidden = true;
     setNotice('loading');
@@ -854,6 +989,10 @@
       await commit(cues, result.source, desired, result.approximate);
     } catch (error) {
       if (disposed || ticket !== revision) return;
+      if (error.failure && error.diagnostic) {
+        lastCaptionFailure = { failure: error.failure, diagnostic: error.diagnostic };
+        diagnosticButton.hidden = false;
+      }
       failedSelection = desired;
       select.value = sourceSelection;
       setNotice('error', error.message);

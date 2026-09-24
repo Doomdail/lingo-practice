@@ -51,7 +51,10 @@ async function lingoYouTube(action, options) {
       );
     const cancellation = (stage) => {
       diagnostic.page.videoMatches = currentId() === options.videoId;
-      return !diagnostic.page.videoMatches || !document.getElementById('lingo-practice-root')
+      return !diagnostic.page.videoMatches ||
+        document.querySelector('#movie_player') !== player ||
+        player.querySelector('video') !== video ||
+        !document.getElementById('lingo-practice-root')
         ? failure('LOAD_CANCELLED', 'Загрузка отменена.', stage, false)
         : null;
     };

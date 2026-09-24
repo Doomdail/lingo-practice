@@ -1,6 +1,6 @@
 # Lingo Practice — Privacy Policy / Политика конфиденциальности
 
-Дата вступления в силу / Effective date: 19 September 2026.
+Дата вступления в силу / Effective date: 24 September 2026.
 
 - Разработчик / Developer: **doomdail**
 - Контакт по вопросам данных / Privacy contact: [GitHub Issues](https://github.com/Doomdail/lingo-practice/issues)
@@ -21,7 +21,7 @@ Lingo Practice помогает тренировать аудирование н
 - текст строк, временные отметки, выбранные слова для пропусков и правильные ответы;
 - введённые ответы, статусы заданий, количество ошибок и использованных подсказок;
 - позиция воспроизведения, сдвиг субтитров, сложность, отметка приблизительных таймкодов и время последнего сохранения;
-- настройки языка/размеров интерфейса и автопаузы, служебная версия записи и идентификатор экземпляра занятия для предотвращения конфликтов между вкладками.
+- настройки языка/размеров интерфейса и автопаузы, статистика трудных слов и контекстов, служебная версия записи и идентификатор экземпляра занятия для предотвращения конфликтов между вкладками.
 
 Эти данные используются для продолжения занятий, подсказок, подсчёта результатов и разбора трудных мест. Они не продаются и не используются для рекламы.
 
@@ -35,7 +35,9 @@ Lingo Practice помогает тренировать аудирование н
 
 Настройки и занятия остаются в текущем профиле браузера после закрытия вкладки или браузера. Расширение не синхронизирует их между устройствами и не удаляет старые занятия по расписанию. Данные хранятся до их перезаписи, удаления хранилища или удаления расширения. Собственное шифрование расширением не применяется.
 
-Чтобы удалить все сохранённые им данные, удалите Lingo Practice через страницу управления расширениями браузера (`chrome://extensions` или `opera://extensions`). Простое отключение расширения, выход из тренировки или очистка истории YouTube не удаляют сохранённые занятия. В текущем интерфейсе нет отдельной кнопки удаления всех данных. Исходные SRT/VTT на диске и данные, которые хранит сам YouTube, удалением расширения не затрагиваются. Резервные копии профиля браузера, если вы их создавали, управляются отдельно.
+В разделе **Мои занятия → Данные и помощь** можно удалить отдельное занятие или все сохранённые данные. Удаление всех данных очищает занятия, статистику слов и настройки в текущем профиле. Также данные удаляются при удалении Lingo Practice через страницу управления расширениями (`chrome://extensions` или `opera://extensions`). Простое отключение расширения, выход из тренировки или очистка истории YouTube не удаляют занятия.
+
+Экспорт JSON содержит субтитры, правильные и введённые ответы, а CSV — трудные слова и контексты. Файлы создаются локально и не отправляются разработчику; после скачивания они остаются там, куда их сохранил браузер, пока вы не удалите их сами. Исходные SRT/VTT на диске и данные YouTube удалением расширения не затрагиваются. При сбое субтитров диагностический отчёт можно скопировать вручную: он содержит код ошибки и технические признаки, но не адрес/название видео, текст субтитров, ответы или имена файлов.
 
 ### Контакт и изменения
 
@@ -61,7 +63,7 @@ The extension's local storage (`chrome.storage.local`) contains:
 - caption text, timestamps, selected gap words and expected answers;
 - your entered answers, task status, mistake counts and hint usage;
 - playback position, caption offset, difficulty, an approximate-timing flag and the last save time;
-- interface language/size and auto-pause preferences, a record revision and a lesson-instance identifier used to prevent conflicting writes from multiple tabs.
+- interface language/size and auto-pause preferences, difficult-word statistics and contexts, a record revision and a lesson-instance identifier used to prevent conflicting writes from multiple tabs.
 
 This data supports lesson resumption, hints, results and review of difficult parts. It is not sold or used for advertising.
 
@@ -75,7 +77,9 @@ YouTube's existing player plays the video. Exercises appear on the YouTube page;
 
 Preferences and lessons remain in the current browser profile after a tab or the browser closes. The extension does not sync them across devices or automatically expire old lessons. They remain until overwritten, their storage is cleared, or the extension is removed. The extension does not apply its own encryption.
 
-To delete all data it has saved, remove Lingo Practice through the browser's extensions page (`chrome://extensions` or `opera://extensions`). Disabling the extension, exiting an exercise or clearing YouTube history does not delete saved lessons. The current interface has no separate delete-all-data button. Removing the extension does not delete original SRT/VTT files on disk or data held by YouTube. Any browser-profile backups you created are managed separately.
+In **My lessons → Data and help**, you can delete one lesson or all saved data. Delete all data clears lessons, word statistics, and settings in this browser profile. Removing Lingo Practice through the browser's extensions page (`chrome://extensions` or `opera://extensions`) also deletes its saved data. Disabling the extension, exiting an exercise, or clearing YouTube history does not delete lessons.
+
+The JSON backup contains captions and correct and entered answers; the CSV contains difficult words and contexts. These files are created locally and are not sent to the developer. Downloads remain where the browser saved them until you delete them yourself. Removing the extension does not delete original SRT/VTT files on disk or data held by YouTube. If caption loading fails, you can copy a diagnostic report containing an error code and technical availability flags, but no video address or title, caption text, answers, or file names.
 
 ### Contact and updates
 
