@@ -388,7 +388,7 @@
     html.lp-active .lp-player { visibility:visible!important; pointer-events:auto!important; position:fixed!important; top:78px!important; left:50%!important; transform:translateX(-50%)!important; width:var(--lp-width)!important; height:var(--lp-height)!important; min-height:0!important; margin:0!important; z-index:2147483001!important; border-radius:14px!important; overflow:hidden!important; box-shadow:0 12px 60px #0007!important; }
     html.lp-active .lp-player .html5-video-container { width:100%!important; height:100%!important; }
     html.lp-active .lp-player video { width:100%!important; height:100%!important; left:0!important; top:0!important; object-fit:contain!important; }
-    html.lp-active .lp-player .caption-window-container { display:none!important; }
+    html.lp-active .lp-player .caption-window-container, html.lp-active .lp-player .ytp-caption-window-container { display:none!important; }
     html.lp-active .lp-player .ytp-fullscreen-button, html.lp-active .lp-player .ytp-size-button, html.lp-active .lp-player .ytp-miniplayer-button { display:none!important; }
   `;
   document.head.append(pageStyle);

@@ -21,13 +21,13 @@ No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download `lingo-practice-0.4.1.zip` from [Releases](https://github.com/Doomdail/lingo-practice/releases).
+1. Download `lingo-practice-0.4.2.zip` from [Releases](https://github.com/Doomdail/lingo-practice/releases).
 2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The 0.4.1 package should appear as **0.4.1** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The 0.4.2 package should appear as **0.4.2** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
 
 ## Use
 
@@ -38,6 +38,8 @@ Type the missing word and press **Enter** or **NumPad Enter**. Matching ignores 
 Use **↶ Replay line** or a timestamp to play a line again. **Go to current line** brings the list back to the video's position. Automatic scrolling pauses while an answer field has focus. Optional **Pause at the end of a line** stops playback when that line still needs an answer.
 
 During practice, NumPad keys do not accidentally seek the video after a click on the player. Numeric input and NumLock-off editing continue to work in the extension's fields. **Exit** or another click on the extension icon restores the page and YouTube's shortcuts. Moving to another video closes practice; click the icon again to start there.
+
+YouTube's own captions are hidden over the video during practice so they cannot reveal missing words. Their CC setting is left unchanged and the captions reappear after you exit if they were enabled.
 
 ### Hints and review
 
