@@ -68,7 +68,7 @@
   }
   const host = document.createElement('div');
   host.id = 'lingo-practice-root';
-  const shadow = host.attachShadow({ mode: 'open' });
+  const shadow = host.attachShadow({ mode: 'closed' });
   const stylesheet = document.createElement('link');
   stylesheet.rel = 'stylesheet';
   stylesheet.href = chrome.runtime.getURL('styles.css');
@@ -82,8 +82,11 @@
     }
     return node;
   };
+  const userEvents = new Set(['click', 'input', 'change', 'keydown', 'keyup', 'keypress']);
   const listen = (node, event, fn, options = {}) =>
-    node.addEventListener(event, fn, { signal, ...options });
+    node.addEventListener(event, (value) => {
+      if (!userEvents.has(event) || value.isTrusted) fn(value);
+    }, { signal, ...options });
   const button = (text, className, callback, eventSignal = signal) => {
     const node = el('button', className, text);
     node.type = 'button';
@@ -289,7 +292,10 @@
   const sourceDialogActions = el('div', 'dialog-actions');
   sourceDialogActions.append(
     button('Отмена', 'secondary', () => sourceDialog.close('cancel')),
-    button('Сменить субтитры', 'primary', () => sourceDialog.close('confirm')),
+    button('Сменить субтитры', 'primary', () => {
+      sourceConfirmed = true;
+      sourceDialog.close('confirm');
+    }),
   );
   sourceDialog.append(
     sourceDialogTitle,
@@ -857,7 +863,8 @@
     }
     settingsDialog.close();
   }
-  let sourceConfirmation = null;
+  let sourceConfirmation = null,
+    sourceConfirmed = false;
   function confirmSourceChange(returnFocus) {
     return new Promise((resolve) => {
       let settled = false;
@@ -871,9 +878,10 @@
         if (!disposed) returnFocus?.focus();
         resolve(confirmed);
       };
-      const onClose = () => finish(sourceDialog.returnValue === 'confirm');
+      const onClose = () => finish(sourceConfirmed);
       const onAbort = () => finish(false);
       sourceDialog.returnValue = 'cancel';
+      sourceConfirmed = false;
       sourceConfirmation = finish;
       sourceDialog.addEventListener('close', onClose, { once: true });
       signal.addEventListener('abort', onAbort, { once: true });
@@ -1445,7 +1453,7 @@
       event.preventDefault();
       return;
     }
-    const target = event.composedPath()[0];
+    const target = shadow.activeElement ?? event.composedPath()[0];
     if (
       event.type === 'keydown' &&
       event.key === 'Enter' &&

@@ -23,5 +23,5 @@ test('YouTube captions with oversized text cannot become an unsavable lesson', (
     });
 
   assert.equal(exercise.createTasks(caption(4000))[0].answer, 'practice');
-  assert.throws(() => exercise.createTasks(caption(4001)), /4000/);
+  assert.throws(() => caption(4001), /4000/);
 });

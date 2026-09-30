@@ -146,8 +146,7 @@
       !Number.isFinite(raw.position) ||
       raw.position < 0 ||
       raw.position > 604800 ||
-      !Number.isFinite(raw.updatedAt) ||
-      raw.updatedAt < 0
+      !exercise.validTimestamp(raw.updatedAt)
     )
       return false;
     return raw.tasks.every(

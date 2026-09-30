@@ -13,6 +13,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from playwright.sync_api import expect, sync_playwright
+from lesson_ui import LessonUI
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -51,12 +52,13 @@ def open_browser(playwright, temporary, extension):
 def open_lesson(context, worker):
     page = context.new_page()
     page.goto(VIDEO_URL)
-    worker.evaluate("""async () => {
+    tab_id = worker.evaluate("""async () => {
         const tabs = await chrome.tabs.query({url: 'https://www.youtube.com/watch*'});
         await toggleTab(tabs.at(-1));
+        return tabs.at(-1).id;
     }""")
     page.locator("#lingo-practice-root").wait_for()
-    return page
+    return page, LessonUI(page, worker, tab_id)
 
 
 def snapshot(worker):
@@ -90,7 +92,7 @@ def check_update(playwright, temporary):
         worker.evaluate("""() => chrome.storage.local.set({preferences: LingoExercise.preferences({
             onboardingSeen: true, language: 'en', fontSize: 22, gapFrequency: 'dense'
         })})""")
-        page = open_lesson(context, worker)
+        page, _ = open_lesson(context, worker)
         expect(page.locator("#lingo-practice-root select.language")).to_be_enabled()
         page.locator("#lingo-practice-root input[type=file]").set_input_files({
             "name": "update.srt", "mimeType": "text/plain", "buffer": SUBTITLES,
@@ -128,10 +130,10 @@ def check_update(playwright, temporary):
         assert worker.evaluate("() => chrome.runtime.id") == original_id
         assert worker.evaluate("() => chrome.runtime.getManifest().version") == version
         assert snapshot(worker) == before, "Updating extension files changed saved data"
-        page = open_lesson(context, worker)
-        expect(page.locator("#lingo-practice-root input[data-cue='0']")).to_have_value(correct)
-        expect(page.locator("#lingo-practice-root input[data-cue='1']")).to_have_value("unfinished draft")
-        expect(page.locator("#lingo-practice-root select.language")).to_have_value("file")
+        page, ui = open_lesson(context, worker)
+        ui.wait("input[data-cue='0']", lambda node: node['value'] == correct)
+        ui.wait("input[data-cue='1']", lambda node: node['value'] == 'unfinished draft')
+        ui.wait('select.language', lambda node: node['value'] == 'file')
         after = snapshot(worker)
         assert after["preferences"] == before["preferences"]
         assert after["wordProfile"] == before["wordProfile"]

@@ -1,7 +1,11 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.4.3",
+  "version": "0.4.4",
+  "minimum_chrome_version": "106",
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; object-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+  },
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "options_ui": { "page": "library.html", "open_in_tab": true },

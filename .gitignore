@@ -1,3 +1,11 @@
 dist/
 __pycache__/
 *.pyc
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+output/

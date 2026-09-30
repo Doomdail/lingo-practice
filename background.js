@@ -1,5 +1,8 @@
 'use strict';
 importScripts('youtube.js', 'exercise.js', 'data.js');
+const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+// Keep startup rejection handled; each operation still awaits it and fails closed.
+storageReady.catch(() => {});
 let storageQueue = Promise.resolve();
 
 async function toggleTab(tab) {
@@ -14,6 +17,7 @@ async function toggleTab(tab) {
     return;
   }
   try {
+    await storageReady;
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       files: ['i18n.js', 'exercise.js', 'content.js'],
@@ -54,12 +58,14 @@ const isLessonPageSender = (sender) =>
   sender.tab.id >= 0 &&
   sender.frameId === 0 &&
   /^https:\/\/www\.youtube\.com\/watch(?:\?|$)/.test(sender.url ?? '');
+const isVideoSender = (message, sender) =>
+  isLessonPageSender(sender) &&
+  validVideoId(message.videoId) &&
+  new URL(sender.url).searchParams.get('v') === message.videoId;
 const isLessonSender = (message, sender) =>
   message?.type === 'LINGO_STORE' &&
   LESSON_ACTIONS.has(message.action) &&
-  isLessonPageSender(sender) &&
-  typeof message.videoId === 'string' &&
-  /^[\w-]{1,64}$/.test(message.videoId);
+  isVideoSender(message, sender);
 const isOpenLibrarySender = (message, sender) =>
   message?.type === 'LINGO_OPEN_LIBRARY' && isLessonPageSender(sender);
 const emptyCaptionDiagnostic = (message) => ({
@@ -87,7 +93,10 @@ const captionFailure = (message, code, messageKey) => ({
 });
 
 function enqueue(operation, sendResponse) {
-  const result = storageQueue.then(operation);
+  const result = storageQueue.then(async () => {
+    await storageReady;
+    return operation();
+  });
   storageQueue = result.catch(() => {});
   result.then(sendResponse).catch(() =>
     sendResponse({
@@ -410,10 +419,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return enqueue(() => handleLessonMessage(message), sendResponse);
   if (
     message?.type !== 'LINGO_YOUTUBE' ||
-    !sender.tab?.id ||
-    sender.frameId !== 0 ||
-    !/^https:\/\/www\.youtube\.com\/watch\?/.test(sender.url ?? '') ||
-    !['tracks', 'load', 'transcript'].includes(message.action)
+    !isVideoSender(message, sender) ||
+    !['tracks', 'load', 'transcript'].includes(message.action) ||
+    (message.trackIndex != null &&
+      (!Number.isInteger(message.trackIndex) || message.trackIndex < 0 || message.trackIndex > 1000))
   )
     return;
   chrome.scripting

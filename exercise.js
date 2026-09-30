@@ -13,7 +13,12 @@
   const hasUserWork = (tasks) => Array.isArray(tasks) && tasks.some(hasStarted);
   const matches = (value, answer) =>
     Boolean(normalizeAnswer(value)) && normalizeAnswer(value) === normalizeAnswer(answer);
-  const spoken = (text) => /\p{L}/u.test(text.replace(/\[[^\]]*\]/g, ''));
+  const spoken = (text) => /\p{L}/u.test(text.replace(/\[[^\[\]]*\]/g, ''));
+  const validTimestamp = (value) => Number.isFinite(value) && value >= 0 && value <= 8.64e15;
+  const validateCueText = (text) => {
+    if (typeof text !== 'string' || text.length > 4000)
+      throw new Error('Слишком длинный объединённый фрагмент: максимум 4000 символов.');
+  };
 
   const common = new Set(
     'a an the i you he she it we they me him her us them my your his our their is am are was were be been being have has had do does did to of in on at for from by and or but if as with this that these those so not no yes can will would could should'.split(
@@ -47,7 +52,7 @@
     // Keep contractions and hyphenated words intact; exclude bracketed cues and common sound labels.
     const excluded = [
       ...cue.text.matchAll(
-        /\[[^\]]*\]|\((?:music|applause|laughter|laughing|cheering|inaudible|silence)\)|https?:\/\/\S+|&[a-z][a-z0-9]*;/gi,
+        /\[[^\[\]]*\]|\((?:music|applause|laughter|laughing|cheering|inaudible|silence)\)|https?:\/\/\S+|&[a-z][a-z0-9]*;/gi,
       ),
     ];
     let words = [...cue.text.matchAll(/\p{L}[\p{L}\p{M}]*(?:['’‘ʼ-][\p{L}\p{M}]+)*/gu)].filter(
@@ -103,7 +108,7 @@
             Number.isSafeInteger(raw?.[key]) && raw[key] >= 0 && raw[key] <= PROFILE_COUNTER_MAX,
         ) &&
         Number.isSafeInteger(raw?.lastSeenAt) &&
-        raw.lastSeenAt >= 0;
+        validTimestamp(raw.lastSeenAt);
       if (!valid) {
         if (strict) return null;
         else continue;
@@ -167,7 +172,7 @@
       )
         continue;
       const key = normalizeAnswer(next.answer);
-      const entry = result.words[key] ?? {
+      const entry = Object.hasOwn(result.words, key) ? result.words[key] : {
         attempts: 0,
         clean: 0,
         mistakes: 0,
@@ -184,7 +189,9 @@
       entry.hints = add(entry.hints, next.hints);
       entry.misses = add(entry.misses, ['skipped', 'revealed'].includes(next.status) ? 1 : 0);
       entry.lastSeenAt = now;
-      result.words[key] = entry;
+      Object.defineProperty(result.words, key, {
+        value: entry, enumerable: true, writable: true, configurable: true,
+      });
     }
     return restoreWordProfile(result);
   }
@@ -199,6 +206,14 @@
   }
 
   function normalizeCues(raw, rolling = true) {
+    if (!Array.isArray(raw) || raw.length > 50_000)
+      throw new Error('Слишком много фрагментов: максимум 5000.');
+    let textLength = 0;
+    for (const cue of raw) {
+      validateCueText(cue?.text);
+      textLength += cue.text.length;
+      if (textLength > 2_000_000) throw new Error('Файл слишком большой: максимум 2 МБ.');
+    }
     const result = [];
     let previous = null;
     for (const item of raw
@@ -216,12 +231,20 @@
         // Match overlapping words in rolling captions; timings still belong to whole segments.
         const oldWords = previous.text.split(' '),
           newWords = text.split(' ');
-        for (let count = Math.min(oldWords.length, newWords.length); count > 0; count--) {
-          if (oldWords.slice(-count).join(' ') === newWords.slice(0, count).join(' ')) {
-            text = newWords.slice(count).join(' ');
-            break;
-          }
+        // Prefix matching keeps repeated or hostile captions linear in word count.
+        const prefixes = new Array(newWords.length).fill(0);
+        for (let i = 1, length = 0; i < newWords.length; i++) {
+          while (length && newWords[i] !== newWords[length]) length = prefixes[length - 1];
+          if (newWords[i] === newWords[length]) length++;
+          prefixes[i] = length;
         }
+        let count = 0;
+        for (const word of oldWords) {
+          while (count && (count === newWords.length || word !== newWords[count]))
+            count = prefixes[count - 1];
+          if (word === newWords[count]) count++;
+        }
+        text = newWords.slice(count).join(' ');
       }
       previous = { text: fullText, end: item.end };
       if (!text) {
@@ -235,14 +258,21 @@
   }
 
   function parseJson3(data) {
+    if (!Array.isArray(data?.events) || data.events.length > 50_000)
+      throw new Error('Не удалось прочитать SRT/VTT: проверьте формат файла.');
     const raw = [];
-    for (const event of data.events ?? []) {
-      if (!Array.isArray(event.segs)) continue;
+    for (const event of data.events) {
+      if (!Array.isArray(event?.segs)) continue;
+      if (event.segs.length > 5000)
+        throw new Error('Слишком много фрагментов: максимум 5000.');
+      for (const segment of event.segs) validateCueText(segment?.utf8 ?? '');
       const text = event.segs.map((s) => s.utf8 ?? '').join('');
+      validateCueText(text);
       if (!text.trim()) continue;
       const start = Number(event.tStartMs) / 1000;
       const end = start + Number(event.dDurationMs ?? 3000) / 1000;
       if (event.aAppend && raw.length) {
+        validateCueText(raw.at(-1).text + text);
         raw.at(-1).text += text;
         raw.at(-1).end = Math.max(raw.at(-1).end, end);
       } else raw.push({ start, end, text });
@@ -292,7 +322,7 @@
     };
     const decoder = typeof document !== 'undefined' ? document.createElement('textarea') : null;
     const clean = (value) => {
-      const stripped = value.replace(/<[^>]*>/g, '');
+      const stripped = value.replace(/<[^<>]*>/g, '');
       // The browser's inert textarea decoder handles the complete HTML character-reference set.
       if (decoder) {
         decoder.innerHTML = stripped;
@@ -397,6 +427,7 @@
       !saved ||
       saved.schema !== 2 ||
       saved.videoId !== videoId ||
+      (saved.updatedAt !== undefined && !validTimestamp(saved.updatedAt)) ||
       !Array.isArray(saved.tasks) ||
       !saved.tasks.length ||
       saved.tasks.length > 5000
@@ -474,6 +505,7 @@
     resultCounts,
     preferences,
     restoreSession,
+    validTimestamp,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LingoExercise = api;

@@ -41,6 +41,8 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Verify ZIP and update from 0.4.2
         run: python tests/update-smoke.py
+      - name: Verify browser security boundaries
+        run: python tests/security-smoke.py
       - name: Build ZIP
         run: python scripts/package_release.py
       - name: Upload installable ZIP

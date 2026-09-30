@@ -32,7 +32,7 @@ function worker(initial = {}, beforeSet = () => {}) {
   const stored = structuredClone(initial);
   let receive;
   vm.runInNewContext(source('background.js'), {
-    importScripts() {}, LingoExercise: exercise, LingoData: data, crypto: { randomUUID },
+    importScripts() {}, URL, LingoExercise: exercise, LingoData: data, crypto: { randomUUID },
     chrome: {
       action: { onClicked: { addListener() {} } },
       runtime: {
@@ -40,6 +40,7 @@ function worker(initial = {}, beforeSet = () => {}) {
         onMessage: { addListener(listener) { receive = listener; } },
       },
       storage: { local: {
+        async setAccessLevel() {},
         async get(keys) {
           if (keys === null) return structuredClone(stored);
           return Object.fromEntries(keys.map((key) => [key, structuredClone(stored[key])]));
@@ -90,14 +91,14 @@ test('YouTube timedtext reaches the JSON3 parser and reports broken responses', 
     }),
   };
   const context = vm.createContext({
-    URL, AbortSignal, location: { href: 'https://www.youtube.com/watch?v=video01', pathname: '/watch' },
+    URL, AbortSignal, TextDecoder, location: { href: 'https://www.youtube.com/watch?v=video01', pathname: '/watch' },
     window: {},
     document: {
       querySelector: () => player, getElementById: () => ({}),
     },
-    fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
+    fetch: async () => new Response(JSON.stringify({
       events: [{ tStartMs: 1000, dDurationMs: 2000, segs: [{ utf8: 'Hello there' }] }],
-    }) }),
+    })),
   });
   vm.runInContext(source('youtube.js'), context);
   const loaded = await context.lingoYouTube('load', { videoId: 'video01', trackIndex: 0 });
@@ -105,7 +106,7 @@ test('YouTube timedtext reaches the JSON3 parser and reports broken responses', 
   assert.deepEqual(exercise.parseJson3(loaded.json).map(({ start, end, text }) => [start, end, text]), [
     [1, 3, 'Hello there'],
   ]);
-  context.fetch = async () => ({ ok: true, status: 200, text: async () => '{' });
+  context.fetch = async () => new Response('{');
   const broken = await context.lingoYouTube('load', { videoId: 'video01', trackIndex: 0 });
   assert.equal(broken.error.code, 'TRACK_FETCH_FAILED');
   assert.equal(broken.diagnostic.timedText.outcome, 'invalid-json');

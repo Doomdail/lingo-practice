@@ -1,6 +1,6 @@
 # Lingo Practice — Privacy Policy / Политика конфиденциальности
 
-Дата вступления в силу / Effective date: 24 September 2026.
+Дата вступления в силу / Effective date: 30 September 2026.
 
 - Разработчик / Developer: **doomdail**
 - Контакт по вопросам данных / Privacy contact: [GitHub Issues](https://github.com/Doomdail/lingo-practice/issues)
@@ -32,6 +32,8 @@ Lingo Practice помогает тренировать аудирование н
 Видео воспроизводит штатный проигрыватель YouTube. Упражнения отображаются на странице YouTube; расширение не управляет обработкой данных самим сайтом. Обычная работа YouTube, включая воспроизведение, рекламу и сетевые запросы, регулируется [политикой конфиденциальности Google](https://policies.google.com/privacy). Код расширения не отправляет ваши ответы или импортированные субтитры отдельным сетевым запросом в YouTube либо разработчику.
 
 ### Хранение и удаление
+
+Панель занятия использует закрытый Shadow DOM и отклоняет программно созданные действия страницы. Это ограничивает прямое чтение сохранённых ответов и подделку действий, но не создаёт отдельную защищённую страницу: скрипты YouTube могут наблюдать события клавиатуры. Не вводите в упражнения пароли и другие секреты.
 
 Настройки и занятия остаются в текущем профиле браузера после закрытия вкладки или браузера. Расширение не синхронизирует их между устройствами и не удаляет старые занятия по расписанию. Данные хранятся до их перезаписи, удаления хранилища или удаления расширения. Собственное шифрование расширением не применяется.
 
@@ -74,6 +76,8 @@ To retrieve captions, the extension may make an HTTPS request to YouTube in the 
 YouTube's existing player plays the video. Exercises appear on the YouTube page; the extension does not control the website's own data processing. YouTube's normal operation, including playback, advertising and network requests, is covered by [Google's Privacy Policy](https://policies.google.com/privacy). Extension code does not upload your answers or imported subtitles to YouTube or the developer through a separate network request.
 
 ### Retention and deletion
+
+The lesson panel uses a closed shadow root and rejects synthetic page actions. This limits direct access to saved answers and forged actions, but does not create a separate protected page: YouTube scripts may observe keyboard events. Do not enter passwords or other secrets into exercises.
 
 Preferences and lessons remain in the current browser profile after a tab or the browser closes. The extension does not sync them across devices or automatically expire old lessons. They remain until overwritten, their storage is cleared, or the extension is removed. The extension does not apply its own encryption.
 

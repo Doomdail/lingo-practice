@@ -33,6 +33,26 @@ async function lingoYouTube(action, options) {
     value?.simpleText ?? value?.runs?.map((run) => run.text ?? '').join('') ?? '';
   const label = (track) =>
     (plain(track.name) || track.languageCode) + (track.kind === 'asr' ? ' · автоматические' : '');
+  const readCaptionText = async (response) => {
+    if (!response.body) return '';
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let bytes = 0, text = '';
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) return text + decoder.decode();
+        bytes += value.byteLength;
+        if (bytes > 2_000_000) {
+          await reader.cancel();
+          throw new Error('CAPTION_TOO_LARGE');
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  };
 
   if (!diagnostic.page.watchPage || !diagnostic.page.videoMatches)
     return failure('VIDEO_CHANGED', 'Открыто другое видео.', 'page', true);
@@ -121,8 +141,8 @@ async function lingoYouTube(action, options) {
         }
         if (
           url &&
-          (url.protocol !== 'https:' ||
-            !['www.youtube.com', 'youtube.com'].includes(url.hostname) ||
+          (!['https://www.youtube.com', 'https://youtube.com'].includes(url.origin) ||
+            url.username || url.password ||
             url.pathname !== '/api/timedtext')
         ) {
           diagnostic.timedText.outcome = 'unsupported-url';
@@ -133,6 +153,7 @@ async function lingoYouTube(action, options) {
           try {
             const timedText = await fetch(url.href, {
               credentials: 'include',
+              redirect: 'error',
               signal: AbortSignal.timeout(8000),
             });
             cancelled = cancellation('timedtext');
@@ -143,7 +164,7 @@ async function lingoYouTube(action, options) {
               timedText.status <= 599
                 ? timedText.status
                 : null;
-            const text = await timedText.text();
+            const text = await readCaptionText(timedText);
             cancelled = cancellation('timedtext');
             if (cancelled) return cancelled;
             if (!timedText.ok) diagnostic.timedText.outcome = 'http-error';
@@ -176,7 +197,8 @@ async function lingoYouTube(action, options) {
             }
           } catch (error) {
             diagnostic.timedText.outcome =
-              error?.name === 'TimeoutError' ? 'timeout' : 'network-error';
+              error?.message === 'CAPTION_TOO_LARGE' ? 'too-large' :
+                error?.name === 'TimeoutError' ? 'timeout' : 'network-error';
           }
         }
       }
