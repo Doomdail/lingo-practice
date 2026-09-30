@@ -37,7 +37,7 @@ From a source checkout of this repository, run `python scripts/package_release.p
 
 Run `node --test` for parser and storage checks. With Python Playwright and its Chromium already installed, `python tests/update-smoke.py` checks the ZIP and an update from tag `v0.4.2` in an isolated profile. `python tests/browser-smoke.py` checks live YouTube and the installed supported browsers; these checks use temporary copies and profiles.
 
-`python tests/security-smoke.py` checks the actual closed lesson interface, rejects forged actions and direct content-script storage access, and verifies genuine keyboard input and file imports. CI runs this security check too. Caption responses are limited to 2 MB; longer sources can be split into SRT/VTT files.
+`python tests/security-smoke.py` checks the actual closed lesson interface, rejects forged actions and direct content-script storage access, and verifies genuine keyboard input and file imports at the 8 MB boundary. CI runs this security check too. Caption responses are limited to 8 MB; longer sources can be split into SRT/VTT files.
 
 [Checks and ZIP](https://github.com/Doomdail/lingo-practice/actions/workflows/checks.yml) runs automatically for pull requests, changes to `main`, and version tags, or manually from the Actions tab. It checks syntax, runs the Node tests, and verifies an update from 0.4.2 in Chromium on a local test page. Successful runs provide an installable ZIP under **Artifacts**, retained for 30 days. The live YouTube check remains a separate local test because it depends on YouTube's availability.
 
@@ -83,7 +83,7 @@ If a caption request fails, **Copy diagnostics** creates a short report with an 
 
 **Open SRT/VTT** accepts a UTF-8 `.srt` or `.vtt` file with these limits:
 
-- 2 MB, meaning **2,000,000 bytes**.
+- 8 MB, meaning **8,000,000 bytes**.
 - **5,000 segments**, with up to **2,000 characters** per segment.
 - Segments starting at the same time are combined, up to **4,000 characters**.
 - Timestamps must include milliseconds, and each end must follow its start.

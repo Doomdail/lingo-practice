@@ -163,14 +163,36 @@ test('caption requests disallow alternate origins, URL credentials and redirects
   assert.equal(redirect, 'error');
 });
 
-test('oversized caption response is cancelled before JSON parsing', async () => {
+test('an 8 MB caption response is accepted', async () => {
+  const json = JSON.stringify({events:[{tStartMs:0, dDurationMs:1000, segs:[{utf8:'Hello world'}]}]});
+  const result = await captions('https://www.youtube.com/api/timedtext', async () =>
+    new Response(json.padEnd(8_000_000, ' ')));
+  assert.equal(result.diagnostic.timedText.outcome, 'success');
+  assert.equal(result.json.events[0].segs[0].utf8, 'Hello world');
+});
+
+test('caption response above 8 MB is cancelled before JSON parsing', async () => {
   let cancelled = false;
   const result = await captions('https://www.youtube.com/api/timedtext', async () => new Response(
     new ReadableStream({start(controller) {
-      controller.enqueue(new Uint8Array(2_000_001)); controller.enqueue(new Uint8Array(1)); controller.close();
+      controller.enqueue(new Uint8Array(8_000_001)); controller.enqueue(new Uint8Array(1)); controller.close();
     },
       cancel() {cancelled = true;}}),
   ));
   assert.equal(cancelled, true);
   assert.equal(result.diagnostic.timedText.outcome, 'too-large');
+});
+
+test('8 MB subtitles are accepted and larger files are rejected', () => {
+  const prefix = 'WEBVTT\n\nNOTE ';
+  const suffix = '\n\n00:00:00.000 --> 00:00:02.000\nHello world';
+  const text = prefix + 'x'.repeat(8_000_000 - prefix.length - suffix.length) + suffix;
+  assert.equal(exercise.parseSubtitles(text)[0].text, 'Hello world');
+  assert.throws(() => exercise.parseSubtitles(text + ' '), /8 МБ/);
+});
+
+test('normalized caption text uses the raised total limit without relaxing cue limits', () => {
+  const raw = Array.from({length:2000}, (_, i) => ({start:i, end:i+1, text:'a'.repeat(4000)}));
+  assert.equal(exercise.normalizeCues(raw, false).length, 2000);
+  assert.throws(() => exercise.normalizeCues([...raw, {start:2000,end:2001,text:'x'}], false), /8 МБ/);
 });

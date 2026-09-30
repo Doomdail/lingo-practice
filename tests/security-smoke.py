@@ -106,8 +106,10 @@ def check(playwright, temporary):
         wait_for(lambda: record()['tasks'][0]['status'] == 'correct')
 
         # DevTools sets the file input through the browser, including its trusted change event.
-        subtitle = temporary / 'valid.srt'
-        subtitle.write_text('1\n00:00:00,000 --> 00:00:02,000\nFresh useful words\n', encoding='utf-8')
+        subtitle = temporary / 'valid.vtt'
+        prefix = b'WEBVTT\n\nNOTE '
+        suffix = b'\n\n00:00:00.000 --> 00:00:02.000\nFresh useful words\n'
+        subtitle.write_bytes(prefix + b'x' * (8_000_000 - len(prefix) - len(suffix)) + suffix)
         client = context.new_cdp_session(page)
 
         def file_node(node):
@@ -136,7 +138,12 @@ def check(playwright, temporary):
         bounds = probe('.source-dialog button.primary')
         page.mouse.click(bounds['x'], bounds['y'])
         wait_for(lambda: record()['tasks'][0]['text'] == 'Fresh useful words')
-        print('PASS: closed lesson DOM, forged input/skip/confirmation denied, storage denied; genuine answer and SRT import saved')
+        oversized = temporary / 'oversized.vtt'
+        oversized.write_bytes(subtitle.read_bytes() + b' ')
+        client.send('DOM.setFileInputFiles', {'files':[str(oversized)], 'backendNodeId':node_id})
+        wait_for(lambda: 'limit is 8 MB' in probe('.notice')['text'])
+        assert record()['tasks'][0]['text'] == 'Fresh useful words'
+        print('PASS: closed UI, forged actions and storage denied; answer and 8 MB import saved; larger file rejected')
     finally:
         context.close()
 

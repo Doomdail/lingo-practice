@@ -43,7 +43,7 @@ async function lingoYouTube(action, options) {
         const { value, done } = await reader.read();
         if (done) return text + decoder.decode();
         bytes += value.byteLength;
-        if (bytes > 2_000_000) {
+        if (bytes > 8_000_000) {
           await reader.cancel();
           throw new Error('CAPTION_TOO_LARGE');
         }

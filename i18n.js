@@ -194,7 +194,7 @@
     'Обновите расширение: сохранение прогресса недоступно.':
       'Update the extension: saving progress is unavailable.',
     'Выберите файл .srt или .vtt.': 'Choose an .srt or .vtt file.',
-    'Файл слишком большой: максимум 2 МБ.': 'The file is too large: the limit is 2 MB.',
+    'Файл слишком большой: максимум 8 МБ.': 'The file is too large: the limit is 8 MB.',
     'В этой дорожке нет слов для тренировки. Выберите другой источник.':
       'This track has no words to practice. Choose another source.',
     'В субтитрах не найдено слов для пропусков.':

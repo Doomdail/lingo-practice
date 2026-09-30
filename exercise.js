@@ -212,7 +212,7 @@
     for (const cue of raw) {
       validateCueText(cue?.text);
       textLength += cue.text.length;
-      if (textLength > 2_000_000) throw new Error('Файл слишком большой: максимум 2 МБ.');
+      if (textLength > 8_000_000) throw new Error('Файл слишком большой: максимум 8 МБ.');
     }
     const result = [];
     let previous = null;
@@ -295,8 +295,8 @@
   }
 
   function parseSubtitles(input) {
-    if (typeof input !== 'string' || input.length > 2_000_000)
-      throw new Error('Файл слишком большой: максимум 2 МБ.');
+    if (typeof input !== 'string' || input.length > 8_000_000)
+      throw new Error('Файл слишком большой: максимум 8 МБ.');
     const clock = (value) => {
       const parts = value.replace(',', '.').split(':').map(Number);
       if (parts.at(-1) >= 60 || parts.at(-2) >= 60)

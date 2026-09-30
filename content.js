@@ -953,7 +953,7 @@
     retry.hidden = true;
     try {
       if (!/\.(srt|vtt)$/i.test(file.name)) throw new Error('Выберите файл .srt или .vtt.');
-      if (file.size > 2_000_000) throw new Error('Файл слишком большой: максимум 2 МБ.');
+      if (file.size > 8_000_000) throw new Error('Файл слишком большой: максимум 8 МБ.');
       const cues = exercise.parseSubtitles(await file.text());
       if (disposed || ticket !== revision) return;
       await commit(cues, file.name, 'file', false, importButton);
