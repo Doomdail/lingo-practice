@@ -70,7 +70,9 @@ def check_update(playwright, temporary):
         assert set(archive.namelist()) == set(RUNTIME) | {
             "README.md", "README.ru.md", "PRIVACY.md", "LICENSE",
         }
-        assert "host_permissions" not in json.loads(archive.read("manifest.json"))
+        packaged_manifest = json.loads(archive.read("manifest.json"))
+        expected_version = packaged_manifest["version"]
+        assert "host_permissions" not in packaged_manifest
         for name in archive.namelist():
             assert archive.read(name) == (ROOT / name).read_bytes(), name
 
@@ -120,7 +122,7 @@ def check_update(playwright, temporary):
     with ZipFile(package) as archive:
         archive.extractall(extension)
     version = prepare_manifest(extension)
-    assert version == "0.4.3"
+    assert version == expected_version
     context, worker = open_browser(playwright, temporary, extension)
     try:
         assert worker.evaluate("() => chrome.runtime.id") == original_id
