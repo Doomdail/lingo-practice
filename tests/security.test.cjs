@@ -62,6 +62,16 @@ test('backup cannot persist a timestamp that breaks library date rendering', () 
   assert.equal(exercise.restoreSession(lesson(), 'video01').updatedAt, 10);
 });
 
+test('imported answers must fit the lesson input and saved-value limit', () => {
+  const backup = data.createBackup({lessons:[lesson()], preferences:{}, wordProfile:{schema:1,words:{}}});
+  const task = backup.lessons[0].tasks[0];
+  Object.assign(task, {text:'a'.repeat(100), answer:'a'.repeat(100), value:'', status:'pending'});
+  assert.equal(data.parseBackup(backup).ok, true);
+  task.text = task.answer = 'a'.repeat(101);
+  assert.equal(exercise.restoreSession(backup.lessons[0], 'video01'), null);
+  assert.equal(data.parseBackup(backup).ok, false);
+});
+
 test('CSV exports quote delimiters and neutralize spreadsheet formulas', () => {
   const csv = data.createVocabularyCsv([{word:'=1+1', context:{
     text:'\t=HYPERLINK("https://example.invalid")', videoTitle:'line1\nline2',
@@ -91,7 +101,8 @@ function worker() {
     chrome: {
       action: {onClicked: {addListener() {}}},
       runtime: {id:'test', getURL: file => `chrome-extension://test/${file}`,
-        onMessage: {addListener(fn) {receive=fn;}}},
+        onMessage: {addListener(fn) {receive=fn;}},
+        async openOptionsPage() {calls.push(['open']);}},
       storage: {local: {
         async setAccessLevel(options) {calls.push(['access', options.accessLevel]);},
         async get() {calls.push(['get']); return {wordProfile:{schema:1,words:{}}};},
@@ -129,6 +140,49 @@ test('worker restricts direct storage access to extension contexts before servin
   const app = worker();
   await app.send({type:'LINGO_STORE', action:'get', videoId:'video01'});
   assert.deepEqual(app.calls[0], ['access', 'TRUSTED_CONTEXTS']);
+});
+
+test('worker follows current SPA video URLs without accepting stale or unrelated reads', async () => {
+  const sender = {tab:{id:1, url:'https://www.youtube.com/watch?v=video02'}};
+  for (const [type, action] of [
+    ['LINGO_STORE', 'get'], ['LINGO_YOUTUBE', 'tracks'],
+    ['LINGO_YOUTUBE', 'load'], ['LINGO_YOUTUBE', 'transcript'],
+  ]) {
+    assert.ok(await worker().send({type, action, videoId:'video02'}, sender));
+    for (const videoId of ['video01', 'unrelated']) {
+      const app = worker();
+      assert.equal(await app.send({type, action, videoId}, sender), undefined);
+      assert.equal(app.calls.some(([name]) => name !== 'access'), false);
+    }
+  }
+  for (const url of [
+    'https://www.youtube.com.evil.invalid/watch?v=video01',
+    'https://www.youtube.com:8443/watch?v=video01', 'http://www.youtube.com/watch?v=video01',
+  ]) {
+    assert.equal(await worker().send({type:'LINGO_STORE', action:'get', videoId:'video02'},
+      {...sender, url}), undefined);
+  }
+});
+
+test('library opening follows the current SPA page', async () => {
+  const message = {type:'LINGO_OPEN_LIBRARY'};
+  assert.equal((await worker().send(message,
+    {tab:{id:1, url:'https://www.youtube.com/watch?v=video02'}})).opened, true);
+  assert.equal(await worker().send(message,
+    {tab:{id:1, url:'https://www.youtube.com/'}}), undefined);
+});
+
+test('SPA saves accept the current video or the original document video on exit', async () => {
+  const save = {type:'LINGO_STORE', action:'save', version:0, storageEpoch:0, writerId:'test'};
+  for (const url of ['https://www.youtube.com/watch?v=video02', 'https://www.youtube.com/']) {
+    const sender = {tab:{id:1, url}};
+    assert.equal((await worker().send({...save, videoId:'video01', session:lesson()}, sender))?.saved, true);
+    assert.equal(await worker().send({...save, videoId:'unrelated',
+      session:{...lesson(), videoId:'unrelated'}}, sender), undefined);
+  }
+  assert.equal((await worker().send({...save, videoId:'video02',
+    session:{...lesson(), videoId:'video02'}},
+    {tab:{id:1, url:'https://www.youtube.com/watch?v=video02'}}))?.saved, true);
 });
 
 function captions(url, fetch) {

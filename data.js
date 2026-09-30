@@ -3,7 +3,7 @@
 
   const exercise =
     typeof module !== 'undefined' && module.exports ? require('./exercise.js') : root.LingoExercise;
-  const limits = { backupBytes: 10_000_000, lessons: 1000, tasks: 5000, words: 2000 };
+  const limits = { backupBytes: 10_000_000, tasks: 5000, words: 2000 };
 
   function vocabulary(profileValue, lessons) {
     const profile = exercise.restoreWordProfile(profileValue);
@@ -223,8 +223,7 @@
       typeof value.preferences !== 'object' ||
       Array.isArray(value.preferences) ||
       !validPreferences(value.preferences) ||
-      !Array.isArray(value.lessons) ||
-      value.lessons.length > limits.lessons
+      !Array.isArray(value.lessons)
     )
       return fail('Резервная копия повреждена или превышает лимиты.');
     const ids = new Set();

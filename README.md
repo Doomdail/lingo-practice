@@ -33,11 +33,15 @@ To update, replace the files in the same installed folder, reload the extension 
 
 This security update blocks forged exercise actions from page scripts, restricts direct storage access, fixes reserved-word handling in statistics, and bounds subtitle parsing and network responses. It preserves existing lessons and requires Chromium 106 or later.
 
+A follow-up review also fixed reopening lessons after YouTube navigation, saving settings before captions load, and backup restoration. Source changes now keep the current lesson until the replacement has been saved successfully.
+
 From a source checkout of this repository, run `python scripts/package_release.py` to create `dist/lingo-practice-0.4.4.zip`. Python's standard library is sufficient. The archive contains the extension, documentation, and license, with `manifest.json` at its root.
 
 Run `node --test` for parser and storage checks. With Python Playwright and its Chromium already installed, `python tests/update-smoke.py` checks the ZIP and an update from tag `v0.4.2` in an isolated profile. `python tests/browser-smoke.py` checks live YouTube and the installed supported browsers; these checks use temporary copies and profiles.
 
 `python tests/security-smoke.py` checks the actual closed lesson interface, rejects forged actions and direct content-script storage access, and verifies genuine keyboard input and file imports at the 8 MB boundary. CI runs this security check too. Caption responses are limited to 8 MB; longer sources can be split into SRT/VTT files.
+
+`python tests/library-roundtrip.py` checks exporting and restoring a large downloaded backup and refreshing the settings import preview. CI also checks this scenario. The security browser check additionally covers full storage, source changes during review, settings without captions, and reopening after YouTube navigation.
 
 [Checks and ZIP](https://github.com/Doomdail/lingo-practice/actions/workflows/checks.yml) runs automatically for pull requests, changes to `main`, and version tags, or manually from the Actions tab. It checks syntax, runs the Node tests, and verifies an update from 0.4.2 in Chromium on a local test page. Successful runs provide an installable ZIP under **Artifacts**, retained for 30 days. The live YouTube check remains a separate local test because it depends on YouTube's availability.
 
@@ -95,6 +99,8 @@ Formatting is removed and multiline text is joined. Invalid files keep the curre
 The extension stores one lesson per video and your settings in `chrome.storage.local` in the current browser profile. Saved data includes caption text, selected gaps, answers, mistakes, hints, the source, subtitle offset, and playback position. Imported text is restored without selecting the file again.
 
 The footer shows save status and storage errors. If another tab has newer progress, reopen practice in the older tab to load it. Old lessons do not expire automatically, and progress is not synced between devices.
+
+The 8 MB subtitle file limit is separate from the browser's storage quota: saved tasks also include answers and text fragments. If a replacement cannot be saved, the current lesson stays open. Free space by exporting a backup and deleting unneeded lessons in **My lessons**. JSON backup files are limited to 10 MB.
 
 Open **My lessons** from the extension's library button or the extension's options page. You can resume or delete individual lessons, search and sort difficult words, and download a CSV word list. **Export backup** downloads a local JSON file containing captions and answers. **Import backup** previews changes before applying them; importing settings is optional. **Delete all data** removes lessons, word statistics, and settings from this browser profile. Keep backup files private and delete them separately when no longer needed.
 

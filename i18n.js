@@ -72,6 +72,8 @@
     Удалить: 'Delete',
     Закрыть: 'Close',
     'Расширение не ответило.': 'The extension did not respond.',
+    'Новое занятие не сохранено. Проверьте свободное место или переоткройте тренировку.':
+      'The new lesson was not saved. Check available storage or reopen practice.',
     'Некорректные данные запроса.': 'The request data is invalid.',
     'Хранилище изменено. Обновите библиотеку.': 'Storage changed. Refresh the library.',
     'Занятие изменено. Обновите библиотеку.': 'The lesson changed. Refresh the library.',

@@ -351,7 +351,7 @@
     downloadBlob(
       `lingo-practice-backup-${new Date().toISOString().slice(0, 10)}.json`,
       'application/json;charset=utf-8',
-      JSON.stringify(result.backup, null, 2),
+      JSON.stringify(result.backup),
     );
     exportDialog.close();
     announce('Резервная копия скачана.');
@@ -547,7 +547,7 @@
       await openImport(input.files[0], input);
       input.value = '';
     });
-    byId('import-preferences').addEventListener('change', previewCurrentImport);
+    byId('import-preferences').addEventListener('change', () => previewCurrentImport());
     byId('apply-import').addEventListener('click', applyImport);
     byId('clear-data').addEventListener('click', (event) => clearLibrary(event.currentTarget));
     byId('show-help').addEventListener('click', (event) =>

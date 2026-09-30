@@ -168,3 +168,24 @@ test('a stale writer cannot overwrite answers; a failed write leaves the queue u
   assert.equal(app.snapshot()['lesson:video01'].tasks[0].value, 'Hello');
   assert.equal((await app.lesson(save('Hello', 1, 'fresh'))).version, 2);
 });
+
+test('merging valid backups keeps the whole library exportable', async () => {
+  const app = worker({ wordProfile: profile });
+  for (const prefix of ['first', 'second']) {
+    const backup = data.createBackup({
+      lessons: Array.from({ length: 600 }, (_, i) => session(`${prefix}${i}`)),
+      preferences: exercise.preferences(), wordProfile: profile,
+    });
+    const preview = await app.library({ action: 'previewImport', backup });
+    assert.equal(preview.error, undefined);
+    const result = await app.library({
+      action: 'import', backup, expectedEpoch: preview.storageEpoch,
+      expectedSummary: preview.summary,
+    });
+    assert.equal(result.imported, true);
+  }
+  const exported = await app.library({ action: 'export' });
+  assert.equal(exported.error, undefined);
+  assert.equal(exported.backup.lessons.length, 1200);
+  assert.equal(data.parseBackup(exported.backup).ok, true);
+});

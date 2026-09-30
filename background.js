@@ -46,6 +46,7 @@ const LIBRARY_ACTIONS = new Set([
   'import',
 ]);
 const validVideoId = (value) => typeof value === 'string' && /^[\w-]{1,64}$/.test(value);
+const isWatchUrl = (value) => /^https:\/\/www\.youtube\.com\/watch(?:\?|$)/.test(value ?? '');
 const isLibrarySender = (message, sender) =>
   message?.type === 'LINGO_LIBRARY' &&
   LIBRARY_ACTIONS.has(message.action) &&
@@ -57,17 +58,23 @@ const isLessonPageSender = (sender) =>
   Number.isInteger(sender.tab?.id) &&
   sender.tab.id >= 0 &&
   sender.frameId === 0 &&
-  /^https:\/\/www\.youtube\.com\/watch(?:\?|$)/.test(sender.url ?? '');
-const isVideoSender = (message, sender) =>
+  /^https:\/\/www\.youtube\.com\//.test(sender.url ?? '');
+// SPA navigation updates tab.url; sender.url retains the isolated world's initial page.
+const isVideoSender = (message, sender, url = sender?.tab?.url ?? sender?.url) =>
   isLessonPageSender(sender) &&
   validVideoId(message.videoId) &&
-  new URL(sender.url).searchParams.get('v') === message.videoId;
+  isWatchUrl(url) &&
+  new URL(url).searchParams.get('v') === message.videoId;
 const isLessonSender = (message, sender) =>
   message?.type === 'LINGO_STORE' &&
   LESSON_ACTIONS.has(message.action) &&
-  isVideoSender(message, sender);
+  // Final saves may arrive after YouTube has already navigated away from the old video.
+  (isVideoSender(message, sender) ||
+    (message.action === 'save' && isVideoSender(message, sender, sender.url)));
 const isOpenLibrarySender = (message, sender) =>
-  message?.type === 'LINGO_OPEN_LIBRARY' && isLessonPageSender(sender);
+  message?.type === 'LINGO_OPEN_LIBRARY' &&
+  isLessonPageSender(sender) &&
+  isWatchUrl(sender.tab?.url ?? sender.url);
 const emptyCaptionDiagnostic = (message) => ({
   schema: 1,
   requestedSource:

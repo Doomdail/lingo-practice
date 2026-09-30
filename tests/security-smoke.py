@@ -43,7 +43,7 @@ def check(playwright, temporary):
           'lesson:security01': {schema:2, videoId:'security01', title:'Private lesson',
             sourceLabel:'private.srt', sourceSelection:'file', updatedAt:10, tasks:[
               {id:0,start:0,end:2,text:'Hello world',before:'',answer:'Hello',after:' world',
-               value:'private draft',status:'pending',mistakes:0,hints:0}
+               value:'private draft',status:'pending',mistakes:1,hints:0}
             ]}
         })''')
         page = context.new_page()
@@ -61,7 +61,7 @@ def check(playwright, temporary):
                 if (!node) return null;
                 const r = node.getBoundingClientRect();
                 return {value:node.value, text:node.textContent, disabled:node.disabled,
-                  x:r.x+r.width/2, y:r.y+r.height/2, open:node.open};
+                  x:r.x+r.width/2, y:r.y+r.height/2, open:node.open, hidden:node.hidden};
               }
             }))[0].result''', {'tabId':tab_id, 'selector':selector})
 
@@ -123,27 +123,120 @@ def check(playwright, temporary):
 
         node_id = file_node(client.send('DOM.getDocument', {'depth':-1, 'pierce':True})['root'])
         assert node_id
+        # Enter review while a file read is pending; its base lesson must not be
+        # autosaved over a replacement that has already been accepted by storage.
+        worker.evaluate('''async tabId => chrome.scripting.executeScript({target:{tabId}, func:()=>{
+          const read = File.prototype.text;
+          File.prototype.text = async function () {
+            File.prototype.text = read;
+            globalThis.fileReadPending = true;
+            await new Promise(resolve => { globalThis.releaseFileRead = resolve; });
+            return read.call(this);
+          };
+        }})''', tab_id)
         client.send('DOM.setFileInputFiles', {'files':[str(subtitle)], 'backendNodeId':node_id})
+        wait_for(lambda: worker.evaluate('''async tabId => (await chrome.scripting.executeScript({
+          target:{tabId},func:()=>globalThis.fileReadPending
+        }))[0].result''', tab_id))
+        bounds = probe('.source-toolbar button:last-of-type')
+        page.mouse.click(bounds['x'], bounds['y'])
+        bounds = probe('.summary-dialog button.primary')
+        page.mouse.click(bounds['x'], bounds['y'])
+        wait_for(lambda: not probe('.review-bar')['hidden'])
+        worker.evaluate('''async tabId => chrome.scripting.executeScript({target:{tabId},
+          func:()=>globalThis.releaseFileRead()})''', tab_id)
         wait_for(lambda: probe('.source-dialog')['open'])
         worker.evaluate('''async tabId => chrome.scripting.executeScript({target:{tabId}, func: () => {
           chrome.dom.openOrClosedShadowRoot(document.getElementById('lingo-practice-root'))
             .querySelector('.source-dialog').close('confirm');
         }})''', tab_id)
         wait_for(lambda: not probe('.source-dialog')['open'])
-        wait_for(lambda: not probe('select.language')['disabled'])
+        wait_for(lambda: probe('input[type="file"]')['value'] == '')
         page.wait_for_timeout(100)  # Flush the async close handler and its storage message.
         assert record()['tasks'][0]['text'] == 'Hello world', 'forged dialog returnValue replaced lesson'
+        worker.evaluate('''async tabId => chrome.scripting.executeScript({target:{tabId}, func:()=>{
+          const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+          globalThis.sourceWrites = [];
+          chrome.runtime.sendMessage = message => {
+            if (message.type === 'LINGO_STORE' && message.action === 'save' && message.session)
+              globalThis.sourceWrites.push(message.session.sourceLabel);
+            return send(message);
+          };
+        }})''', tab_id)
         client.send('DOM.setFileInputFiles', {'files':[str(subtitle)], 'backendNodeId':node_id})
         wait_for(lambda: probe('.source-dialog')['open'])
         bounds = probe('.source-dialog button.primary')
         page.mouse.click(bounds['x'], bounds['y'])
         wait_for(lambda: record()['tasks'][0]['text'] == 'Fresh useful words')
+        page.wait_for_timeout(100)
+        assert record()['tasks'][0]['text'] == 'Fresh useful words', 'review exit overwrote the accepted source'
+        source_writes = worker.evaluate('''async tabId => (await chrome.scripting.executeScript({
+          target:{tabId},func:()=>globalThis.sourceWrites
+        }))[0].result''', tab_id)
+        assert source_writes and all(name == 'valid.vtt' for name in source_writes), source_writes
         oversized = temporary / 'oversized.vtt'
         oversized.write_bytes(subtitle.read_bytes() + b' ')
         client.send('DOM.setFileInputFiles', {'files':[str(oversized)], 'backendNodeId':node_id})
         wait_for(lambda: 'limit is 8 MB' in probe('.notice')['text'])
         assert record()['tasks'][0]['text'] == 'Fresh useful words'
-        print('PASS: closed UI, forged actions and storage denied; answer and 8 MB import saved; larger file rejected')
+
+        # Exhaust real browser storage, then try replacing an unfinished lesson.
+        bounds = probe(answer)
+        page.mouse.click(bounds['x'], bounds['y'])
+        page.keyboard.type('keep my draft')
+        wait_for(lambda: record()['tasks'][0]['value'] == 'keep my draft')
+        worker.evaluate('''async () => {
+          const used = await chrome.storage.local.getBytesInUse(null);
+          await chrome.storage.local.set({padding:'x'.repeat(chrome.storage.local.QUOTA_BYTES-used-500)});
+        }''')
+        full = temporary / 'storage-full.vtt'
+        full.write_text('WEBVTT\n\n00:00:00.000 --> 00:00:02.000\n' + 'Large useful words ' * 90, encoding='utf-8')
+        client.send('DOM.setFileInputFiles', {'files':[str(full)], 'backendNodeId':node_id})
+        wait_for(lambda: probe('.source-dialog')['open'])
+        bounds = probe('.source-dialog button.primary')
+        page.mouse.click(bounds['x'], bounds['y'])
+        wait_for(lambda: not probe('select.language')['disabled'])
+        wait_for(lambda: 'error' in worker.evaluate('''async tabId => (await chrome.scripting.executeScript({
+          target:{tabId},func:()=>chrome.dom.openOrClosedShadowRoot(document.getElementById('lingo-practice-root'))
+            .querySelector('.save-status').className
+        }))[0].result''', tab_id))
+        assert probe(answer)['value'] == 'keep my draft', 'failed storage write replaced the visible lesson'
+        assert record()['tasks'][0]['value'] == 'keep my draft'
+        worker.evaluate("async () => chrome.storage.local.remove('padding')")
+
+        # Settings also have to save when a video has no lesson yet.
+        worker.evaluate('async tabId => toggleTab({id:tabId,url:"https://www.youtube.com/watch?v=security01"})', tab_id)
+        page.goto('https://www.youtube.com/watch?v=empty01')
+        tab_id = worker.evaluate('''async () => {
+          const tab = (await chrome.tabs.query({url:'https://www.youtube.com/watch?v=empty01'}))[0];
+          await toggleTab(tab); return tab.id;
+        }''')
+        wait_for(lambda: probe('.pause-option input'))
+        page.wait_for_timeout(150)  # Let the worker finish loading preferences.
+        bounds = probe('.pause-option input')
+        page.mouse.click(bounds['x'], bounds['y'])
+        page.wait_for_timeout(300)
+        assert worker.evaluate("async () => (await chrome.storage.local.get('preferences')).preferences.autoPause") is True, 'settings without captions were not saved'
+
+        # A second activation in the same YouTube document has an old sender.url.
+        page.evaluate('''() => {
+          history.pushState({}, '', '/watch?v=security01');
+          document.dispatchEvent(new Event('yt-navigate-finish'));
+        }''')
+        wait_for(lambda: page.locator('#lingo-practice-root').count() == 0)
+        worker.evaluate('''async tabId => toggleTab({id:tabId,
+          url:'https://www.youtube.com/watch?v=security01'})''', tab_id)
+        wait_for(lambda: probe(answer))
+        assert probe(answer)['value'] == 'keep my draft', 'SPA reopen did not restore the new video lesson'
+        page.evaluate('''() => {
+          document.querySelector('video').currentTime = 17;
+          history.pushState({}, '', '/watch?v=another01');
+          document.dispatchEvent(new Event('yt-navigate-finish'));
+        }''')
+        wait_for(lambda: page.locator('#lingo-practice-root').count() == 0)
+        page.wait_for_timeout(100)
+        assert record()['position'] == 17, 'second SPA transition lost the final lesson position'
+        print('PASS: UI and storage security; 8 MB limit; source/review race; quota preservation; empty settings; SPA reopen')
     finally:
         context.close()
 

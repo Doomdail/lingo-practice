@@ -43,6 +43,8 @@ jobs:
         run: python tests/update-smoke.py
       - name: Verify browser security boundaries
         run: python tests/security-smoke.py
+      - name: Verify large backup roundtrip and settings preview
+        run: python tests/library-roundtrip.py
       - name: Build ZIP
         run: python scripts/package_release.py
       - name: Upload installable ZIP

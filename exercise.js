@@ -446,7 +446,7 @@
         item.text.length > 4000 ||
         typeof item.before !== 'string' ||
         typeof item.after !== 'string' ||
-        (item.answer !== null && typeof item.answer !== 'string') ||
+        (item.answer !== null && (typeof item.answer !== 'string' || item.answer.length > 100)) ||
         item.before + (item.answer ?? '') + item.after !== item.text ||
         typeof item.value !== 'string' ||
         item.value.length > 100 ||

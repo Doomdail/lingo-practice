@@ -28,6 +28,7 @@
     approximate = false;
   let initialized = false,
     busy = false,
+    savingSource = false,
     failedSelection = null,
     lastSave = 0,
     lastPosition = video.currentTime;
@@ -680,8 +681,9 @@
     if (!result) throw new Error('Обновите расширение: сохранение прогресса недоступно.');
     return result;
   }
-  function saveNow() {
-    if (!initialized || disposed || saveBlocked) return Promise.resolve(false);
+  function saveNow(nextSource = null) {
+    if (!initialized || disposed || saveBlocked || (savingSource && !nextSource))
+      return Promise.resolve(false);
     lastSave = Date.now();
     if (
       !review &&
@@ -691,16 +693,16 @@
       new URL(location.href).searchParams.get('v') === videoId
     )
       lastPosition = video.currentTime;
-    const base = review?.base ?? tasks;
+    const base = nextSource?.tasks ?? review?.base ?? tasks;
     const session = base.length
       ? {
           schema: 2,
           videoId,
           title: title.textContent,
-          sourceLabel,
-          sourceSelection,
-          approximate,
-          offset,
+          sourceLabel: nextSource?.label ?? sourceLabel,
+          sourceSelection: nextSource?.selection ?? sourceSelection,
+          approximate: nextSource?.rounded ?? approximate,
+          offset: nextSource ? 0 : offset,
           difficulty: prefs.difficulty,
           gapFrequency: prefs.gapFrequency,
           position: review?.position ?? lastPosition,
@@ -712,7 +714,7 @@
     preferenceChanges = {};
     setText(saveStatus, 'Сохраняем…');
     return storage('save', {
-      session,
+      ...(session ? { session } : {}),
       writerId,
       version: storageVersion,
       storageEpoch,
@@ -917,32 +919,45 @@
         return false;
       }
     }
-    clearPauseGate();
-    if (review) leaveReview();
-    stopSlowReplay();
-    tasks = nextTasks;
-    sourceLabel = label;
-    sourceSelection = selection;
-    approximate = rounded;
-    offset = 0;
-    offsetInput.value = '0';
-    if (selection === 'file' && ![...select.options].some((o) => o.value === 'file'))
-      option('file', label);
-    if (selection === 'file')
-      setRawText(
-        [...select.options].find((o) => o.value === 'file'),
-        label,
-      );
-    select.value = selection;
-    ready = true;
-    failedSelection = null;
-    retry.hidden = true;
-    setNotice('source');
-    previousTime = captionTime();
-    draw();
-    maybeShowOnboarding();
-    saveNow();
-    return true;
+    // Keep the current lesson until the browser accepts the replacement.
+    // Inert UI and paused autosaves prevent an old draft overwriting that replacement.
+    savingSource = true;
+    host.inert = true;
+    try {
+      if (!(await saveNow({ tasks: nextTasks, label, selection, rounded }))) {
+        select.value = sourceSelection;
+        throw new Error('Новое занятие не сохранено. Проверьте свободное место или переоткройте тренировку.');
+      }
+      if (disposed) return false;
+      clearPauseGate();
+      if (review) leaveReview();
+      stopSlowReplay();
+      tasks = nextTasks;
+      sourceLabel = label;
+      sourceSelection = selection;
+      approximate = rounded;
+      offset = 0;
+      offsetInput.value = '0';
+      if (selection === 'file' && ![...select.options].some((o) => o.value === 'file'))
+        option('file', label);
+      if (selection === 'file')
+        setRawText(
+          [...select.options].find((o) => o.value === 'file'),
+          label,
+        );
+      select.value = selection;
+      ready = true;
+      failedSelection = null;
+      retry.hidden = true;
+      setNotice('source');
+      previousTime = captionTime();
+      draw();
+      maybeShowOnboarding();
+      return true;
+    } finally {
+      savingSource = false;
+      host.inert = false;
+    }
   }
   async function importFile() {
     const file = fileInput.files?.[0];
@@ -1500,8 +1515,10 @@
     setText(play, video.paused ? 'Продолжить' : 'Пауза');
   }
   bindMedia();
+  // Native navigation fires before the SPA changes its URL, while this lesson is authorized.
+  listen(window.navigation, 'navigate', () => saveNow());
   listen(document, 'yt-navigate-finish', tick);
-  listen(window, 'pagehide', saveNow);
+  listen(window, 'pagehide', () => saveNow());
   listen(document, 'visibilitychange', () => {
     if (document.hidden) saveNow();
   });
