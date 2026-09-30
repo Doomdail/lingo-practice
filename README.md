@@ -37,6 +37,8 @@ From a source checkout of this repository, run `python scripts/package_release.p
 
 Run `node --test` for parser and storage checks. With Python Playwright and its Chromium already installed, `python tests/update-smoke.py` checks the ZIP and an update from tag `v0.4.2` in an isolated profile. `python tests/browser-smoke.py` checks live YouTube and the installed supported browsers; these checks use temporary copies and profiles.
 
+[Checks and ZIP](https://github.com/Doomdail/lingo-practice/actions/workflows/checks.yml) runs automatically for pull requests, changes to `main`, and version tags, or manually from the Actions tab. It checks syntax, runs the Node tests, and verifies an update from 0.4.2 in Chromium on a local test page. Successful runs provide an installable ZIP under **Artifacts**, retained for 30 days. The live YouTube check remains a separate local test because it depends on YouTube's availability.
+
 ## Use
 
 ### Answers and playback
