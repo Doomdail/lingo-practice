@@ -129,6 +129,9 @@
   }
 
   function createTasks(cues, options = {}) {
+    if (cues.length > 5000) throw new Error('Слишком много фрагментов: максимум 5000.');
+    if (cues.some((cue) => cue.text.length > 4000))
+      throw new Error('Слишком длинный объединённый фрагмент: максимум 4000 символов.');
     const random = options.random ?? Math.random;
     const difficulty = preferences(options).difficulty;
     const gapFrequency = preferences(options).gapFrequency;

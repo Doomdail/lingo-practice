@@ -21,13 +21,21 @@ No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download `lingo-practice-0.4.2.zip` from [Releases](https://github.com/Doomdail/lingo-practice/releases).
+1. Download the latest published ZIP from [Releases](https://github.com/Doomdail/lingo-practice/releases), or create the current 0.4.3 package using the local packaging instructions below.
 2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The 0.4.2 package should appear as **0.4.2** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The local 0.4.3 package should appear as **0.4.3** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
+
+## Version 0.4.3 and local packaging
+
+This reliability update waits for a late YouTube transcript button and rejects caption sources exceeding storage limits before replacing the current lesson. A rejected source change also preserves the lesson's auto-pause state.
+
+From a source checkout of this repository, run `python scripts/package_release.py` to create `dist/lingo-practice-0.4.3.zip`. Python's standard library is sufficient. The archive contains the extension, documentation, and license, with `manifest.json` at its root.
+
+Run `node --test` for parser and storage checks. With Python Playwright and its Chromium already installed, `python tests/update-smoke.py` checks the ZIP and an update from tag `v0.4.2` in an isolated profile. `python tests/browser-smoke.py` checks live YouTube and the installed supported browsers; these checks use temporary copies and profiles.
 
 ## Use
 
@@ -92,7 +100,9 @@ Removing the extension or using **Delete all data** clears its saved local data.
 
 ## Compatibility
 
-Main scenarios and a live YouTube page have been tested in **Chromium on Windows**. Keyboard input and language switching were also tested in **Opera GX 135.0.5973.94**. Edge has not been tested separately. Layouts cover desktop and compact windows, including 1440×1050 and 780×800.
+Live YouTube caption loading and lesson reopening have been checked in **Chromium, Edge, and Opera GX on Windows**. The Chromium scenario also checks conflicting tabs and backup restoration after deleting data. Layouts cover desktop and compact windows, including 1440×1050 and 780×800.
+
+Automation grants YouTube access only in its temporary extension copies to simulate activation. It tests caption hiding with a synthetic caption element. Manual Chrome checks of the toolbar button and real YouTube captions are still required before publishing 0.4.3.
 
 Shorts, live streams, mobile YouTube, other video sites, and full-screen practice are unsupported. Exercise tracking is suspended during ads, but not every advertising variant has been tested. Caption availability and accuracy depend on YouTube and the video. Difficulty is optimized for English; there is no dedicated Chinese or Japanese word segmentation.
 

@@ -324,7 +324,13 @@ async function lingoYouTube(action, options) {
         source: 'Расшифровка YouTube · текущий язык',
         diagnostic,
       };
-    const button = document.querySelector(OPENER_SELECTOR);
+    let button = document.querySelector(OPENER_SELECTOR);
+    for (let attempt = 0; !button && attempt < 24; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      cancelled = cancellation('transcript-entry');
+      if (cancelled) return cancelled;
+      button = document.querySelector(OPENER_SELECTOR);
+    }
     diagnostic.transcript.openerFound = Boolean(button);
     if (!button)
       return failure(

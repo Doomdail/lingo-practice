@@ -892,7 +892,6 @@
     if (ready) draw();
   }
   async function commit(cues, label, selection, rounded = false, returnFocus = select) {
-    clearPauseGate();
     const nextTasks = exercise.createTasks(cues, {
       random: Math.random,
       difficulty: prefs.difficulty,
@@ -910,6 +909,7 @@
         return false;
       }
     }
+    clearPauseGate();
     if (review) leaveReview();
     stopSlowReplay();
     tasks = nextTasks;
