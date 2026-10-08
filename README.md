@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-English · [Русский](README.ru.md) · [Download](https://github.com/Doomdail/lingo-practice/releases) · [Issues](https://github.com/Doomdail/lingo-practice/issues)
+English · [Русский](README.ru.md) · [Download 0.4.4](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.4) · [Issues](https://github.com/Doomdail/lingo-practice/issues)
 
 Practice listening with YouTube videos. Fill in missing words, replay a line, and revisit difficult parts while keeping your progress on your device.
 
@@ -21,29 +21,25 @@ No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download the latest published ZIP from [Releases](https://github.com/Doomdail/lingo-practice/releases), or create the current 0.4.4 package using the local packaging instructions below.
+1. Download [lingo-practice-0.4.4.zip](https://github.com/Doomdail/lingo-practice/releases/download/v0.4.4/lingo-practice-0.4.4.zip). You can also download or clone this repository and load its source folder directly.
 2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all scripts, `_locales`, and `icons`. The local 0.4.4 package should appear as **0.4.4** on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts, `_locales`, and `icons`. Version **0.4.4** should appear on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
 
-## Version 0.4.4 and local packaging
+## Version 0.4.4
 
 This security update blocks forged exercise actions from page scripts, restricts direct storage access, fixes reserved-word handling in statistics, and bounds subtitle parsing and network responses. It preserves existing lessons and requires Chromium 106 or later.
 
 A follow-up review also fixed reopening lessons after YouTube navigation, saving settings before captions load, and backup restoration. Source changes now keep the current lesson until the replacement has been saved successfully.
 
-From a source checkout of this repository, run `python scripts/package_release.py` to create `dist/lingo-practice-0.4.4.zip`. Python's standard library is sufficient. The archive contains the extension, documentation, and license, with `manifest.json` at its root.
+SRT/VTT files and caption responses are limited to **8 MB** (8,000,000 bytes). Backup JSON files are limited to **10 MB**. Existing progress is preserved by updating in the same installed folder.
 
-Run `node --test` for parser and storage checks. With Python Playwright and its Chromium already installed, `python tests/update-smoke.py` checks the ZIP and an update from tag `v0.4.2` in an isolated profile. `python tests/browser-smoke.py` checks live YouTube and the installed supported browsers; these checks use temporary copies and profiles.
+Before publication, local checks covered subtitle parsing, storage conflicts, security boundaries, large backup restoration, and an update from 0.4.2. Development plans, test files, and packaging helpers are kept locally and excluded from the public repository.
 
-`python tests/security-smoke.py` checks the actual closed lesson interface, rejects forged actions and direct content-script storage access, and verifies genuine keyboard input and file imports at the 8 MB boundary. CI runs this security check too. Caption responses are limited to 8 MB; longer sources can be split into SRT/VTT files.
-
-`python tests/library-roundtrip.py` checks exporting and restoring a large downloaded backup and refreshing the settings import preview. CI also checks this scenario. The security browser check additionally covers full storage, source changes during review, settings without captions, and reopening after YouTube navigation.
-
-[Checks and ZIP](https://github.com/Doomdail/lingo-practice/actions/workflows/checks.yml) runs automatically for pull requests, changes to `main`, and version tags, or manually from the Actions tab. It checks syntax, runs the Node tests, and verifies an update from 0.4.2 in Chromium on a local test page. Successful runs provide an installable ZIP under **Artifacts**, retained for 30 days. The live YouTube check remains a separate local test because it depends on YouTube's availability.
+[Checks and ZIP](https://github.com/Doomdail/lingo-practice/actions/workflows/checks.yml) checks JavaScript syntax and builds an installable ZIP automatically for pull requests, changes to `main`, and version tags, or manually from the Actions tab. The archive contains only the extension, documentation, and license, with `manifest.json` at its root. Successful runs provide the ZIP under **Artifacts**, retained for 30 days. Full lesson and browser tests are run locally.
 
 ## Use
 
@@ -112,7 +108,7 @@ Removing the extension or using **Delete all data** clears its saved local data.
 
 Live YouTube caption loading and lesson reopening have been checked in **Chromium, Edge, and Opera GX on Windows**. The Chromium scenario also checks conflicting tabs and backup restoration after deleting data. Layouts cover desktop and compact windows, including 1440×1050 and 780×800.
 
-Automation grants YouTube access only in its temporary extension copies to simulate activation. It tests caption hiding with a synthetic caption element. Manual Chrome checks of the toolbar button and real YouTube captions are still required before publishing 0.4.4.
+Local automation grants YouTube access only in its temporary extension copies to simulate activation. It tests caption hiding with a synthetic caption element. The toolbar button and real YouTube captions in branded Chrome still need a manual check.
 
 Shorts, live streams, mobile YouTube, other video sites, and full-screen practice are unsupported. Exercise tracking is suspended during ads, but not every advertising variant has been tested. Caption availability and accuracy depend on YouTube and the video. Difficulty is optimized for English; there is no dedicated Chinese or Japanese word segmentation.
 

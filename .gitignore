@@ -9,3 +9,6 @@ __pycache__/
 .env.*
 !.env.example
 output/
+/docs/superpowers/plans/
+/tests/
+/scripts/
