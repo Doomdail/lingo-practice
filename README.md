@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-English · [Русский](README.ru.md) · [Download 0.4.4](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.4) · [Issues](https://github.com/Doomdail/lingo-practice/issues)
+English · [Русский](README.ru.md) · [Download 0.4.5](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.5) · [Issues](https://github.com/Doomdail/lingo-practice/issues)
 
 Practice listening with YouTube videos. Fill in missing words, replay a line, and revisit difficult parts while keeping your progress on your device.
 
@@ -21,15 +21,15 @@ No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download [lingo-practice-0.4.4.zip](https://github.com/Doomdail/lingo-practice/releases/download/v0.4.4/lingo-practice-0.4.4.zip). You can also download or clone this repository and load its source folder directly.
+1. Download [lingo-practice-0.4.5.zip](https://github.com/Doomdail/lingo-practice/releases/download/v0.4.5/lingo-practice-0.4.5.zip). You can also download or clone this repository and load its source folder directly.
 2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.4** for the published release, **0.4.5** for the candidate from `main`. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.5** for this release. Removing the extension deletes its local progress; an ordinary update does not require removal.
 
-## Version 0.4.5 — candidate
+## Version 0.4.5
 
 - Completed exercises and answers without hints are visibly distinguished, including assisted, revealed and skipped answers.
 - **My lessons** is available in the practice header. Library cards say **Open video** and explain clicking the extension icon to resume.
@@ -38,7 +38,7 @@ To update, replace the files in the same installed folder, reload the extension 
 - A stalled YouTube transcript panel is reported as a loading failure with recovery steps.
 - Fixed practice clicks blocked by YouTube's page transition animations.
 
-The 0.4.5 candidate source is available in `main`; the published download above remains 0.4.4.
+Download the installable ZIP from [Release 0.4.5](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.5).
 
 ## Version 0.4.4
 
