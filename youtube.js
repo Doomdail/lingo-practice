@@ -296,7 +296,10 @@ async function lingoYouTube(action, options) {
         const unknownNewPanel =
           includeNewPanels && newlyExpanded.has(panel) && !expanded.has(panel) && !knownModel;
         if (!knownModel && !unknownNewPanel) continue;
-        if (unknownNewPanel) unknownModelObserved = true;
+        if (
+          unknownNewPanel &&
+          !panel.querySelector('ytd-continuation-item-renderer, yt-content-loading-renderer')
+        ) unknownModelObserved = true;
         walk(panel.data);
       }
       if (!raw.length && !exhausted()) {

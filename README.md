@@ -35,6 +35,8 @@ To update, replace the files in the same installed folder, reload the extension 
 - **My lessons** is available in the practice header. Library cards say **Open video** and explain clicking the extension icon to resume.
 - The first-use help starts with listening when exercises are already loaded.
 - Missing-caption guidance explains exiting practice, opening YouTube's transcript and returning, with other-video and SRT/VTT alternatives.
+- A stalled YouTube transcript panel is reported as a loading failure with recovery steps.
+- Fixed practice header buttons that sometimes ignored clicks after reloading YouTube.
 
 This candidate is prepared locally; the published download above remains 0.4.4.
 

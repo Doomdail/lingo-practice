@@ -406,7 +406,8 @@
     html.lp-active .lp-player .ytp-fullscreen-button, html.lp-active .lp-player .ytp-size-button, html.lp-active .lp-player .ytp-miniplayer-button { display:none!important; }
   `;
   document.head.append(pageStyle);
-  document.body.append(host);
+  // YouTube's body can block hit testing of fixed header buttons.
+  document.documentElement.append(host);
   const layoutStyle = el('style');
   document.head.append(layoutStyle);
   player.classList.add('lp-player');
