@@ -27,9 +27,9 @@ No account, API key, server, build step, or runtime dependency is required.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.4** for the published release, **0.4.5** for the local candidate. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.4** for the published release, **0.4.5** for the candidate from `main`. Removing the extension deletes its local progress; an ordinary update does not require removal.
 
-## Version 0.4.5 — local candidate
+## Version 0.4.5 — candidate
 
 - Completed exercises and answers without hints are visibly distinguished, including assisted, revealed and skipped answers.
 - **My lessons** is available in the practice header. Library cards say **Open video** and explain clicking the extension icon to resume.
@@ -38,7 +38,7 @@ To update, replace the files in the same installed folder, reload the extension 
 - A stalled YouTube transcript panel is reported as a loading failure with recovery steps.
 - Fixed practice clicks blocked by YouTube's page transition animations.
 
-This candidate is prepared locally; the published download above remains 0.4.4.
+The 0.4.5 candidate source is available in `main`; the published download above remains 0.4.4.
 
 ## Version 0.4.4
 
