@@ -395,6 +395,8 @@
   const pageStyle = el('style');
   pageStyle.textContent = `
     html.lp-active { --lp-width:min(900px,calc(100vw - 40px),71.111vh); --lp-height:min(506.25px,calc((100vw - 40px)*9/16),40vh); }
+    /* YouTube's navigation snapshot otherwise intercepts practice clicks. */
+    html.lp-active::view-transition { display:none!important; }
     html.lp-active body { overflow:hidden!important; }
     html.lp-active body > :not(#lingo-practice-root) { visibility:hidden!important; }
     html.lp-active body > ytd-app { position:relative!important; z-index:2147483001!important; pointer-events:none!important; }
@@ -406,8 +408,7 @@
     html.lp-active .lp-player .ytp-fullscreen-button, html.lp-active .lp-player .ytp-size-button, html.lp-active .lp-player .ytp-miniplayer-button { display:none!important; }
   `;
   document.head.append(pageStyle);
-  // YouTube's body can block hit testing of fixed header buttons.
-  document.documentElement.append(host);
+  document.body.append(host);
   const layoutStyle = el('style');
   document.head.append(layoutStyle);
   player.classList.add('lp-player');
