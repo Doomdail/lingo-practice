@@ -108,7 +108,12 @@
   const settingsButton = button('Настройки', 'exit', () =>
     showDialog(settingsDialog, settingsButton),
   );
-  headerActions.append(helpButton, settingsButton, button('Выйти', 'exit', close));
+  headerActions.append(
+    button('Мои занятия', 'exit', openLibrary),
+    helpButton,
+    settingsButton,
+    button('Выйти', 'exit', close),
+  );
   header.append(brand, headerActions);
   const lesson = el('main', 'lesson');
   const heading = el('div', 'lesson-heading');
@@ -116,7 +121,10 @@
   titleBox.append(el('p', 'eyebrow', 'СЛУШАЙ. ВПИСЫВАЙ. ЗАПОМИНАЙ.'));
   const title = el('h1', '', 'Твоя следующая маленькая победа');
   titleBox.append(title);
-  const stats = el('div', 'stats', '—');
+  const stats = el('div', 'stats');
+  const statsProgress = el('span', 'stats-progress', '—');
+  const statsDetails = el('span', 'stats-details');
+  stats.append(statsProgress, statsDetails);
   setAttr(stats, 'aria-label', 'Результат');
   heading.append(titleBox, stats);
   const toolbar = el('div', 'toolbar');
@@ -274,11 +282,7 @@
       'Сложность меняет только ещё не начатые задания. На небольшом экране видимых строк может быть меньше выбранного числа.',
     ),
   );
-  const settingsMessage = el('p', 'settings-message');
-  settingsMessage.hidden = true;
   settingsDialog.append(
-    settingsMessage,
-    button('Мои занятия', 'secondary', openLibrary),
     button('Закрыть настройки', 'primary', () => settingsDialog.close()),
   );
   const summaryDialog = el('dialog', 'summary-dialog');
@@ -312,9 +316,12 @@
   helpDialogTitle.id = 'practice-help-title';
   helpDialog.setAttribute('aria-labelledby', helpDialogTitle.id);
   const helpSteps = el('ol', 'help-steps');
+  const helpFirstStep = el(
+    'li', '', 'Выберите источник субтитров или откройте файл SRT/VTT.',
+  );
   helpSteps.append(
-    el('li', '', 'Выберите дорожку или импортируйте SRT/VTT.'),
-    el('li', '', 'Слушайте, вписывайте слово и нажимайте Enter.'),
+    helpFirstStep,
+    el('li', '', 'Впишите пропущенное слово и нажмите Enter.'),
     el('li', '', 'Используйте повтор и подсказки; прогресс сохраняется автоматически.'),
   );
   helpDialog.append(
@@ -463,9 +470,9 @@
         TRACK_FETCH_FAILED:
           'YouTube не отдал эту дорожку. Выберите «Расшифровка YouTube» или «Автоматически».',
         TRANSCRIPT_ENTRY_MISSING:
-          'Субтитры недоступны. Откройте «Показать текст видео» в описании YouTube и повторите загрузку.',
+          'Субтитры недоступны. Нажмите «Выйти», откройте «Показать текст видео» в описании YouTube и снова нажмите значок Lingo Practice. Если текста нет, выберите другое видео или загрузите SRT/VTT.',
         TRANSCRIPT_TIMEOUT:
-          'YouTube не загрузил текст субтитров. Попробуйте открыть расшифровку вручную или выбрать другое видео.',
+          'YouTube не загрузил субтитры. Нажмите «Выйти», откройте «Показать текст видео» в описании YouTube и снова нажмите значок Lingo Practice. Можно также выбрать другое видео или загрузить SRT/VTT.',
         TRANSCRIPT_UNKNOWN_MODEL:
           'YouTube использует неизвестный формат расшифровки. Повторите попытку позже.',
         LOAD_CANCELLED: 'Загрузка отменена.',
@@ -474,7 +481,7 @@
         PAGE_CONTEXT_CHANGED: 'Страница изменилась. Закройте режим и включите его снова.',
       };
       const code = Object.hasOwn(messages, failure.code) ? failure.code : 'CAPTION_READ_FAILED';
-      throw Object.assign(new Error(t(messages[code])), {
+      throw Object.assign(new Error(messages[code]), {
         failure: { code, stage: failure.stage, retryable: failure.retryable === true },
         diagnostic: result.diagnostic,
       });
@@ -664,7 +671,7 @@
           : noticeState === 'source'
             ? sourceNotice()
             : t(noticeMessage) +
-              (noticeState === 'error' && ready ? t(' Текущая тренировка сохранена.') : ''),
+              (noticeState === 'error' && ready ? t(' Текущая тренировка остаётся открытой.') : ''),
     );
   }
   async function storage(action, payload = {}) {
@@ -824,6 +831,13 @@
     saveNow();
   }
   function showOnboarding(returnFocus = null) {
+    setText(
+      helpFirstStep,
+      ready
+        ? 'Задания уже готовы. Запустите видео и послушайте первую фразу.'
+        : 'Выберите источник субтитров или откройте файл SRT/VTT.',
+    );
+    if (helpDialog.open) return;
     helpDialog.returnValue = 'closed';
     helpDialog.addEventListener(
       'close',
@@ -836,7 +850,7 @@
     helpDialog.showModal();
   }
   function maybeShowOnboarding() {
-    if (ready && !prefs.onboardingSeen && !helpDialog.open) showOnboarding();
+    if (ready && (helpDialog.open || !prefs.onboardingSeen)) showOnboarding();
   }
   function firstUnfinishedInput() {
     return rows.find((row, index) => tasks[index]?.answer && !exercise.finished(tasks[index]))
@@ -848,7 +862,6 @@
     importButton.disabled = value || Boolean(review);
   }
   async function openLibrary() {
-    settingsMessage.hidden = true;
     allowRepeatAnnouncement();
     await saveNow();
     if (disposed) return;
@@ -858,12 +871,9 @@
     } catch {}
     if (disposed) return;
     if (!result?.opened) {
-      setText(settingsMessage, 'Не удалось открыть «Мои занятия». Повторите попытку.');
-      settingsMessage.hidden = false;
-      announce('Не удалось открыть «Мои занятия». Повторите попытку.');
+      setNotice('error', 'Не удалось открыть «Мои занятия». Повторите попытку.');
       return;
     }
-    settingsDialog.close();
   }
   let sourceConfirmation = null,
     sourceConfirmed = false;
@@ -1166,7 +1176,15 @@
   }
   function updateStats() {
     const counts = exercise.resultCounts(tasks);
-    setRawText(stats, `${counts.independent} / ${counts.total}`);
+    setText(statsProgress, 'Завершено: {completed} / {total}', {
+      completed: counts.total - counts.remaining,
+      total: counts.total,
+    });
+    setText(
+      statsDetails,
+      'Без подсказок: {independent} · с подсказкой: {assisted} · показано: {revealed} · пропущено: {skipped}',
+      counts,
+    );
     const description =
       'Самостоятельно: {independent}. С подсказкой: {assisted}. Показано: {revealed}. Пропущено: {skipped}. Осталось: {remaining}.';
     setAttr(stats, 'title', description, counts);

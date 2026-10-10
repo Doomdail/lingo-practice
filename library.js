@@ -140,9 +140,10 @@
         }),
       );
       const actions = create('div', 'card-actions');
-      const continueButton = create('button', '', t('Продолжить'));
-      continueButton.type = 'button';
-      continueButton.addEventListener('click', () => {
+      const openButton = create('button', '', t('Открыть видео'));
+      openButton.type = 'button';
+      openButton.setAttribute('aria-describedby', 'lesson-open-note');
+      openButton.addEventListener('click', () => {
         Promise.resolve(openLesson(lesson.videoId, lesson.position)).catch((error) =>
           announce(error.message),
         );
@@ -150,7 +151,7 @@
       const deleteButton = create('button', 'danger secondary-danger', t('Удалить'));
       deleteButton.type = 'button';
       deleteButton.addEventListener('click', () => deleteLesson(lesson, deleteButton));
-      actions.append(continueButton, deleteButton);
+      actions.append(openButton, deleteButton);
       card.append(title, source, date, position, progress, actions);
       cards.append(card);
     }

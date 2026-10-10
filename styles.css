@@ -139,7 +139,12 @@ h1 {
   text-overflow: ellipsis;
 }
 .stats {
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 50%;
+  flex-shrink: 0;
+  text-align: right;
   font-size: 23px;
   letter-spacing: -1px;
   font-variant-numeric: tabular-nums;
@@ -148,6 +153,12 @@ h1 {
   border: 1px solid #304a3b;
   border-radius: 12px;
   padding: 9px 17px;
+}
+.stats-details {
+  font-size: 12px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  color: #bbc7cd;
 }
 .toolbar,
 .controls {
@@ -496,14 +507,6 @@ dialog.modal {
   line-height: 1.6;
   margin: 16px 0;
 }
-.settings-message {
-  margin: 16px 0;
-  padding: 12px;
-  border: 1px solid #65483d;
-  border-radius: 8px;
-  background: #332620;
-  color: #f0c4ae;
-}
 .summary-dialog[open] {
   display: flex;
   flex-direction: column;
@@ -617,18 +620,36 @@ dialog.modal {
 @media (max-width: 580px) {
   .header {
     padding: 0 16px;
+    height: 72px;
   }
   .header .controls {
     gap: 6px;
   }
   .exit {
-    padding: 7px 10px;
+    padding: 6px 8px;
+    font-size: 12px;
   }
   .brand {
     font-size: 16px;
   }
   .beta {
     display: none;
+  }
+  .brand > :not(.brand-mark) {
+    display: none;
+  }
+  .lesson-heading {
+    margin-bottom: 0;
+  }
+  .stats {
+    font-size: 16px;
+    line-height: 1.2;
+    gap: 0;
+    padding: 0 8px;
+  }
+  .stats-details {
+    font-size: 11px;
+    line-height: 1.25;
   }
   .toolbar {
     flex-wrap: wrap;
@@ -665,9 +686,6 @@ dialog.modal {
   }
 }
 @media (max-width: 380px) {
-  .brand > :not(.brand-mark) {
-    display: none;
-  }
   .header {
     gap: 0.5rem;
   }

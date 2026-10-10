@@ -10,6 +10,23 @@
     'Твоя следующая маленькая победа': 'Your next small win',
     Результат: 'Result',
     Продолжить: 'Continue',
+    'Открыть видео': 'Open video',
+    'В открывшемся видео нажмите значок Lingo Practice, чтобы продолжить тренировку.':
+      'In the video that opens, click the Lingo Practice icon to continue practicing.',
+    'Откройте видео на YouTube и нажмите значок Lingo Practice.':
+      'Open a YouTube video and click the Lingo Practice icon.',
+    'Задания уже готовы. Запустите видео и послушайте первую фразу.':
+      'Your exercises are ready. Play the video and listen to the first phrase.',
+    'Выберите источник субтитров или откройте файл SRT/VTT.':
+      'Choose a subtitle source or open an SRT/VTT file.',
+    'Впишите пропущенное слово и нажмите Enter.':
+      'Fill in the missing word and press Enter.',
+    'Без подсказок: {independent} · с подсказкой: {assisted} · показано: {revealed} · пропущено: {skipped}':
+      'Without hints: {independent} · with hints: {assisted} · revealed: {revealed} · skipped: {skipped}',
+    'Субтитры недоступны. Нажмите «Выйти», откройте «Показать текст видео» в описании YouTube и снова нажмите значок Lingo Practice. Если текста нет, выберите другое видео или загрузите SRT/VTT.':
+      'Subtitles are unavailable. Click “Exit”, open “Show transcript” in the YouTube description, then click the Lingo Practice icon again. If there is no transcript, choose another video or import SRT/VTT.',
+    'YouTube не загрузил субтитры. Нажмите «Выйти», откройте «Показать текст видео» в описании YouTube и снова нажмите значок Lingo Practice. Можно также выбрать другое видео или загрузить SRT/VTT.':
+      'YouTube did not load the subtitles. Click “Exit”, open “Show transcript” in the YouTube description, then click the Lingo Practice icon again. You can also choose another video or import SRT/VTT.',
     'Мои занятия': 'My lessons',
     Занятия: 'Lessons',
     'Трудные слова': 'Difficult words',
@@ -142,7 +159,7 @@
     'Прогресс не сохранён': 'Progress was not saved',
     'Прогресс восстановлен': 'Progress restored',
     'Сохранение недоступно': 'Saving is unavailable',
-    ' Текущая тренировка сохранена.': ' Your current practice has been kept.',
+    ' Текущая тренировка остаётся открытой.': ' Your current practice remains open.',
     Пропустить: 'Skip',
     Подсказка: 'Hint',
     'Повторить медленнее': 'Replay more slowly',

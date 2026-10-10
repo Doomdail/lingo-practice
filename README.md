@@ -27,7 +27,16 @@ No account, API key, server, build step, or runtime dependency is required.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts, `_locales`, and `icons`. Version **0.4.4** should appear on the extensions page. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.4** for the published release, **0.4.5** for the local candidate. Removing the extension deletes its local progress; an ordinary update does not require removal.
+
+## Version 0.4.5 — local candidate
+
+- Completed exercises and answers without hints are visibly distinguished, including assisted, revealed and skipped answers.
+- **My lessons** is available in the practice header. Library cards say **Open video** and explain clicking the extension icon to resume.
+- The first-use help starts with listening when exercises are already loaded.
+- Missing-caption guidance explains exiting practice, opening YouTube's transcript and returning, with other-video and SRT/VTT alternatives.
+
+This candidate is prepared locally; the published download above remains 0.4.4.
 
 ## Version 0.4.4
 
@@ -57,7 +66,7 @@ YouTube's own captions are hidden over the video during practice so they cannot 
 
 Successive presses of the hint button show the first letter, replay the fragment at **0.75×**, and reveal the answer. The previous playback speed returns when the slow replay ends, playback pauses, or practice closes.
 
-The main score is **correct answers without hints / total exercises**. Assisted answers, revealed words, skips, and unanswered exercises are listed separately in **Review mistakes** and the score tooltip. A corrected answer without hints counts as independent, while its earlier mistake remains in the review.
+In 0.4.5, **Completed / total exercises** shows progress, including assisted, revealed and skipped answers. Separate visible counts explain answers without hints, assisted answers, revealed words and skips. **Review mistakes** also shows unanswered exercises. A corrected answer without hints counts as independent, while its earlier mistake remains in the review. The published 0.4.4 release displays independent answers / total exercises as its main score.
 
 **Review mistakes** shows the original phrases and mistake/hint counts. Unanswered exercises are included after the video or captions finish. Replay a single fragment or choose **Repeat difficult parts** for a separate practice queue. It waits for an answer at the end of each unfinished fragment. **Back to practice** restores your original answers and playback position; review does not overwrite the main result.
 
@@ -98,7 +107,7 @@ The footer shows save status and storage errors. If another tab has newer progre
 
 The 8 MB subtitle file limit is separate from the browser's storage quota: saved tasks also include answers and text fragments. If a replacement cannot be saved, the current lesson stays open. Free space by exporting a backup and deleting unneeded lessons in **My lessons**. JSON backup files are limited to 10 MB.
 
-Open **My lessons** from the extension's library button or the extension's options page. You can resume or delete individual lessons, search and sort difficult words, and download a CSV word list. **Export backup** downloads a local JSON file containing captions and answers. **Import backup** previews changes before applying them; importing settings is optional. **Delete all data** removes lessons, word statistics, and settings from this browser profile. Keep backup files private and delete them separately when no longer needed.
+Open **My lessons** from the practice header in 0.4.5, **Settings** in 0.4.4, or the extension's options page. **Open video** opens YouTube at the saved position; click the Lingo Practice icon there to restore the exercise. You can delete individual lessons, search and sort difficult words, and download a CSV word list. **Export backup** downloads a local JSON file containing captions and answers. **Import backup** previews changes before applying them; importing settings is optional. **Delete all data** removes lessons, word statistics, and settings from this browser profile. Keep backup files private and delete them separately when no longer needed.
 
 `activeTab` and `scripting` allow access to the current tab after you click the icon; `storage` saves progress locally. There is no analytics or developer-operated service. Caption requests go to YouTube in the current page's context, and YouTube's normal playback and network activity continue.
 
