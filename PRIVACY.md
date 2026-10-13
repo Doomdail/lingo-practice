@@ -1,8 +1,8 @@
 # Lingo Practice — Privacy Policy / Политика конфиденциальности
 
-Редакция для локального кандидата 0.4.6 / Revision for the local 0.4.6 candidate: 13 October 2026.
+Редакция для версии 0.4.6 / Revision for version 0.4.6: 13 October 2026.
 
-Эта редакция описывает отдельное окно кандидата 0.4.6. Опубликованная 0.4.5 использует панель на странице YouTube, где скрипты страницы могут наблюдать события клавиатуры. / This revision describes the separate window in candidate 0.4.6. Published 0.4.5 uses an on-page panel where page scripts can observe keyboard events.
+Эта редакция описывает отдельное окно версии 0.4.6, доступной в исходниках `main`. Релиз 0.4.5 использует панель на странице YouTube, где скрипты страницы могут наблюдать события клавиатуры. / This revision describes the separate window in version 0.4.6, available in the `main` source. Release 0.4.5 uses an on-page panel where page scripts can observe keyboard events.
 
 - Разработчик / Developer: **doomdail**
 - Контакт по вопросам данных / Privacy contact: [GitHub Issues](https://github.com/Doomdail/lingo-practice/issues)

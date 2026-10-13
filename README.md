@@ -2,11 +2,11 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-English · [Русский](README.ru.md) · [Download 0.4.5](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.5) · [Issues](https://github.com/Doomdail/lingo-practice/issues)
+English · [Русский](README.ru.md) · [Source ZIP 0.4.6](https://github.com/Doomdail/lingo-practice/archive/refs/heads/main.zip) · [Release 0.4.5](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.5) · [Issues](https://github.com/Doomdail/lingo-practice/issues)
 
 Practice listening with YouTube videos. Fill in missing words, replay a line, and revisit difficult parts while keeping your progress on your device.
 
-This working branch contains the **local 0.4.6 candidate**. The published GitHub download remains **0.4.5**, whose exercises run on the YouTube page. The candidate opens exercises in a separate extension window; it has not been published.
+The `main` branch contains **version 0.4.6**, which opens exercises in a separate extension window. The latest packaged GitHub release remains **0.4.5**, whose exercises run on the YouTube page.
 
 ## Features
 
@@ -24,15 +24,15 @@ No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download the published [lingo-practice-0.4.5.zip](https://github.com/Doomdail/lingo-practice/releases/download/v0.4.5/lingo-practice-0.4.5.zip), or use the local candidate's source folder to try 0.4.6.
+1. Download the [0.4.6 source ZIP from `main`](https://github.com/Doomdail/lingo-practice/archive/refs/heads/main.zip).
 2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
-5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. In the 0.4.6 candidate, this opens a separate practice window. Keep the video tab open and arrange the two windows side by side. Pin the icon from the browser's extensions menu for easier access.
+5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Version 0.4.6 opens a separate practice window. Keep the video tab open and arrange the two windows side by side. Pin the icon from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts and pages, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.6** for this candidate or **0.4.5** for the published ZIP. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts and pages, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.6** for the source ZIP or **0.4.5** for the older release ZIP. Removing the extension deletes its local progress; an ordinary update does not require removal.
 
-## Version 0.4.6 — local candidate
+## Version 0.4.6
 
 - All exercise text, answer fields, settings and file imports run in an independent extension window. YouTube page scripts cannot read keyboard events inside that window.
 - The YouTube tab receives media commands, video size and numeric fragment boundaries. It does not receive lesson answers, imported text, file names, word statistics or stored settings objects.
@@ -41,7 +41,7 @@ To update, replace the files in the same installed folder, reload the extension 
 
 Local Chromium 147 checks passed for typing/paste isolation, imports, restored lessons, review, backup, paused seeking, window navigation/reload, worker restart and a suspended practice window. A separate smoke check used YouTube's real player for playback, seeking, slow replay and close cleanup. Automated activation used a temporary test-only host grant; the native toolbar button, Chromium 106 and other browsers still need manual verification.
 
-This candidate is available locally for verification. No GitHub release or download for 0.4.6 has been published.
+The 0.4.6 source is available in `main`. A separate packaged GitHub release for 0.4.6 has not been published.
 
 ## Version 0.4.5
 
@@ -63,8 +63,6 @@ A follow-up review also fixed reopening lessons after YouTube navigation, saving
 SRT/VTT files and caption responses are limited to **8 MB** (8,000,000 bytes). Backup JSON files are limited to **10 MB**. Existing progress is preserved by updating in the same installed folder.
 
 Before publication, local checks covered subtitle parsing, storage conflicts, security boundaries, large backup restoration, and an update from 0.4.2. Development plans, test files, and packaging helpers are kept locally and excluded from the public repository.
-
-[Checks and ZIP](https://github.com/Doomdail/lingo-practice/actions/workflows/checks.yml) checks JavaScript syntax and builds an installable ZIP automatically for pull requests, changes to `main`, and version tags, or manually from the Actions tab. The archive contains only the extension, documentation, and license, with `manifest.json` at its root. Successful runs provide the ZIP under **Artifacts**, retained for 30 days. Full lesson and browser tests are run locally.
 
 ## Use
 
@@ -133,7 +131,7 @@ Removing the extension or using **Delete all data** clears its saved local data.
 
 ## Compatibility
 
-The published 0.4.5 line's YouTube caption loading and lesson reopening were checked in **Chromium, Edge, and Opera GX on Windows**. Its Chromium scenario also checked conflicting tabs and backup restoration after deleting data. Layouts covered desktop and compact windows, including 1440×1050 and 780×800. These results do not establish compatibility of the new 0.4.6 practice window; candidate results are recorded separately during local verification.
+The published 0.4.5 line's YouTube caption loading and lesson reopening were checked in **Chromium, Edge, and Opera GX on Windows**. Its Chromium scenario also checked conflicting tabs and backup restoration after deleting data. Layouts covered desktop and compact windows, including 1440×1050 and 780×800. These results do not establish compatibility of the new 0.4.6 practice window; its local verification results are described above.
 
 Local automation grants YouTube access only in its temporary extension copies to simulate activation. It tests caption hiding with a synthetic caption element. The toolbar button and real YouTube captions in branded Chrome still need a manual check.
 
