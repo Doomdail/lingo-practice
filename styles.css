@@ -102,7 +102,7 @@ select:focus-visible {
 }
 .lesson {
   position: absolute;
-  top: calc(78px + var(--lp-height) + 24px);
+  top: 84px;
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
@@ -576,7 +576,7 @@ dialog.modal {
 }
 @media (max-height: 850px) {
   .lesson {
-    top: calc(78px + var(--lp-height) + 16px);
+    top: 84px;
     bottom: 12px;
   }
   .lesson-heading {

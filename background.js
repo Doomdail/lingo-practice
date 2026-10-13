@@ -1,80 +1,259 @@
 'use strict';
 importScripts('youtube.js', 'exercise.js', 'data.js');
-const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
-// Keep startup rejection handled; each operation still awaits it and fails closed.
-storageReady.catch(() => {});
-let storageQueue = Promise.resolve();
-
-async function toggleTab(tab) {
-  if (!tab?.id || !/^https:\/\/www\.youtube\.com\/watch\?/.test(tab.url ?? '')) {
-    if (tab?.id) {
-      await chrome.action.setBadgeText({ tabId: tab.id, text: 'YT' });
-      await chrome.action.setTitle({
-        tabId: tab.id,
-        title: chrome.i18n.getMessage('openYouTubeTitle'),
-      });
-    }
-    return;
-  }
+const bindings = new Map(), openings = new Map(), pendingTokens = new Set();
+const validVideoId = (value) => typeof value === 'string' && /^[\w-]{1,64}$/.test(value);
+const videoFromUrl = (value) => {
   try {
-    await storageReady;
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['i18n.js', 'exercise.js', 'content.js'],
-    });
-    await chrome.action.setBadgeText({ tabId: tab.id, text: '' });
-    await chrome.action.setTitle({ tabId: tab.id, title: chrome.i18n.getMessage('actionTitle') });
-  } catch (error) {
-    await chrome.action.setBadgeText({ tabId: tab.id, text: '!' });
-    await chrome.action.setTitle({
-      tabId: tab.id,
-      title: chrome.i18n.getMessage('activationFailureTitle'),
-    });
-    console.warn('Lingo Practice: activation failed', error.message);
+    const url = new URL(value);
+    const id = url.searchParams.get('v');
+    return url.origin === 'https://www.youtube.com' && url.pathname === '/watch' && validVideoId(id) ? id : null;
+  } catch { return null; }
+};
+const validId = (value) => Number.isInteger(value) && value >= 0;
+const panelUrl = (token) => chrome.runtime.getURL('practice.html') + '#' + token;
+// Without "tabs", Chrome omits extension-page URLs from tabs.get (but not MessageSender).
+const panelTabMatches = (tab,binding) => tab?.id === binding.panelTabId && tab.windowId === binding.windowId &&
+  (tab.url === undefined || tab.url === panelUrl(binding.token));
+const validBinding = (value) => value && validId(value.tabId) && validId(value.panelTabId) &&
+  validId(value.windowId) && validVideoId(value.videoId) && typeof value.documentId === 'string' &&
+  value.documentId.length > 0 && typeof value.token === 'string' && /^[\w-]{36}$/.test(value.token);
+const storageReady = Promise.all([
+  chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }),
+  chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }),
+]).then(async () => {
+  const stored = await chrome.storage.session.get('practiceBindings');
+  for (const binding of Array.isArray(stored.practiceBindings) ? stored.practiceBindings : []) {
+    if (!validBinding(binding)) continue;
+    try {
+      const panel = await chrome.tabs.get(binding.panelTabId);
+      await chrome.windows.get(binding.windowId);
+      if (!panelTabMatches(panel,binding)) throw new Error('Panel changed');
+      binding.panelInactive = true;
+      bindings.set(binding.tabId, binding);
+    } catch { await bridgeMessage(binding,{action:'close'}); }
+  }
+  await persistBindings();
+});
+// Every private operation awaits this promise and fails closed on storage rejection.
+storageReady.catch(() => {});
+let storageQueue = Promise.resolve(), bindingQueue = Promise.resolve();
+const persistBindings = () => {
+  const snapshot = [...bindings.values()].map(({ mediaQueue, port, ...binding }) => binding);
+  const operation = bindingQueue.then(() => chrome.storage.session.set({ practiceBindings: snapshot }));
+  bindingQueue = operation.catch(() => {});
+  return operation;
+};
+const disconnectedMedia = () => ({ connected:false, currentTime:0, duration:0, paused:true,
+  ended:false, seeking:false, readyState:0, playbackRate:1, adPlaying:false });
+function sanitizeMedia(value) {
+  if (value?.connected !== true) return disconnectedMedia();
+  const seconds = (number) => Number.isFinite(number) && number >= 0 && number <= 604860 ? number : 0;
+  return { connected:true, currentTime:seconds(value.currentTime), duration:seconds(value.duration),
+    paused:value.paused !== false, ended:value.ended === true, seeking:value.seeking === true,
+    readyState:Number.isInteger(value.readyState) && value.readyState >= 0 && value.readyState <= 4 ? value.readyState : 0,
+    playbackRate:Number.isFinite(value.playbackRate) && value.playbackRate >= 0.0625 && value.playbackRate <= 16 ? value.playbackRate : 1,
+    adPlaying:value.adPlaying === true };
+}
+const validTime = (value) => Number.isFinite(value) && value >= 0 && value <= 604860;
+function mediaCommand(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (['state','play','pause','restoreRate'].includes(value.action)) return { action:value.action };
+  if (value.action === 'seek' && validTime(value.time)) return { action:'seek', time:value.time };
+  if (value.action === 'replay' && validTime(value.start) && validTime(value.end) && value.end > value.start &&
+      typeof value.slow === 'boolean' && typeof value.pauseAtEnd === 'boolean')
+    return { action:'replay', start:value.start, end:value.end, slow:value.slow, pauseAtEnd:value.pauseAtEnd };
+  if (value.action === 'configure' && ['small','medium','large'].includes(value.videoSize)) {
+    if (value.gate === null) return { action:'configure', videoSize:value.videoSize, gate:null };
+    const gate = value.gate;
+    if (gate && validTime(gate.start) && validTime(gate.end) && gate.end > gate.start && typeof gate.force === 'boolean')
+      return { action:'configure', videoSize:value.videoSize, gate:{start:gate.start,end:gate.end,force:gate.force} };
+  }
+  return null;
+}
+async function withinDeadline(promise, milliseconds = 3000) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Media timeout')), milliseconds);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+async function sourceMatches(binding) {
+  try { return videoFromUrl((await chrome.tabs.get(binding.tabId)).url) === binding.videoId; }
+  catch { return false; }
+}
+function bridgeMessage(binding, command) {
+  const operation = (binding.mediaQueue ?? Promise.resolve()).then(async () => {
+    if (command.action !== 'close' && !await sourceMatches(binding)) return disconnectedMedia();
+    try {
+      return sanitizeMedia(await withinDeadline(chrome.tabs.sendMessage(binding.tabId,
+        { type:'LINGO_MEDIA', videoId:binding.videoId, command }, { documentId:binding.documentId })));
+    } catch { return disconnectedMedia(); }
+  });
+  binding.mediaQueue = operation.catch(() => {});
+  return operation;
+}
+function reattachBridge(binding) {
+  const operation = (binding.mediaQueue ?? Promise.resolve()).then(async () => {
+    if (!await sourceMatches(binding)) return disconnectedMedia();
+    try {
+      const [result] = await withinDeadline(chrome.scripting.executeScript({
+        target:{tabId:binding.tabId,documentIds:[binding.documentId]},files:['content.js'],
+      }));
+      if (result?.result?.videoId !== binding.videoId) {
+        if (validVideoId(result?.result?.videoId)) await withinDeadline(chrome.tabs.sendMessage(binding.tabId,
+          {type:'LINGO_MEDIA',videoId:result.result.videoId,command:{action:'close'}},{documentId:binding.documentId}));
+        return disconnectedMedia();
+      }
+      return sanitizeMedia(await withinDeadline(chrome.tabs.sendMessage(binding.tabId,
+        {type:'LINGO_MEDIA',videoId:binding.videoId,command:{action:'state'}},{documentId:binding.documentId})));
+    } catch { return disconnectedMedia(); }
+  });
+  binding.mediaQueue = operation.catch(() => {});
+  return operation;
+}
+async function registeredPanel(sender, allowInit = false) {
+  if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !validId(sender.tab?.id) ||
+      typeof sender.documentId !== 'string' || !sender.documentId.length) return null;
+  const binding = [...bindings.values()].find(value => value.panelTabId === sender.tab.id && sender.url === panelUrl(value.token));
+  if (!binding) return null;
+  try {
+    const tab = await chrome.tabs.get(binding.panelTabId);
+    if (!panelTabMatches(tab,binding)) return null;
+  } catch { return null; }
+  if (allowInit) {
+    if (binding.panelDocumentId !== sender.documentId) {
+      const previousDocument = binding.panelDocumentId, previousPort = binding.port;
+      binding.panelDocumentId = sender.documentId;
+      delete binding.port;
+      previousPort?.disconnect();
+      if (previousDocument) await bridgeMessage(binding,{action:'close'});
+      binding.panelInactive = false;
+      await persistBindings();
+    }
+  } else if (binding.panelDocumentId !== sender.documentId) return null;
+  return bindings.get(binding.tabId) === binding ? binding : null;
+}
+async function disposeBinding(binding, removeWindow = false) {
+  if (bindings.get(binding.tabId) !== binding) return;
+  bindings.delete(binding.tabId);
+  try { await persistBindings(); }
+  finally {
+    await bridgeMessage(binding, {action:'close'});
+    if (removeWindow) try { await chrome.windows.remove(binding.windowId); } catch {}
   }
 }
+async function openPractice(tab) {
+  await storageReady;
+  const videoId = videoFromUrl(tab.url);
+  const previous = bindings.get(tab.id);
+  if (previous) {
+    if (previous.videoId === videoId && !previous.panelInactive) {
+      try {
+        const panel = await chrome.tabs.get(previous.panelTabId);
+        const [source] = await chrome.scripting.executeScript({ target:{tabId:tab.id}, func:() => true });
+        if (panelTabMatches(panel,previous) && source?.documentId === previous.documentId) {
+          await chrome.windows.update(previous.windowId, {focused:true});
+          return;
+        }
+      } catch {}
+    }
+    await disposeBinding(previous, true);
+  }
+  const results = await chrome.scripting.executeScript({ target:{tabId:tab.id}, files:['content.js'] });
+  const source = results.find(value => value.frameId === 0);
+  const documentId = source?.documentId, actualVideoId = source?.result?.videoId;
+  if (typeof documentId !== 'string' || !documentId.length) throw new Error('No source document');
+  if (actualVideoId !== videoId || !await sourceMatches({tabId:tab.id,videoId})) {
+    if (validVideoId(actualVideoId)) await bridgeMessage({tabId:tab.id,videoId:actualVideoId,documentId},{action:'close'});
+    throw new Error('Source changed during activation');
+  }
+  const binding = { tabId:tab.id,videoId,documentId,token:crypto.randomUUID(),panelInactive:false };
+  pendingTokens.add(binding.token);
+  let win;
+  try {
+    win = await chrome.windows.create({url:panelUrl(binding.token),type:'popup',width:680,height:900});
+    const panel = win?.tabs?.find(value => validId(value.id));
+    if (!validId(win?.id) || !panel) throw new Error('No practice window');
+    Object.assign(binding,{windowId:win.id,panelTabId:panel.id});
+    bindings.set(tab.id,binding);
+    await persistBindings();
+  } catch (error) {
+    bindings.delete(tab.id);
+    await bridgeMessage(binding,{action:'close'});
+    if (win?.id) try {await chrome.windows.remove(win.id);} catch {}
+    throw error;
+  } finally { pendingTokens.delete(binding.token); }
+}
+async function toggleTab(tab) {
+  if (!validId(tab?.id)) return;
+  if (!videoFromUrl(tab.url)) {
+    await chrome.action.setBadgeText({tabId:tab.id,text:'YT'});
+    await chrome.action.setTitle({tabId:tab.id,title:chrome.i18n.getMessage('openYouTubeTitle')});
+    return;
+  }
+  const operation = (openings.get(tab.id) ?? Promise.resolve()).then(() => openPractice(tab));
+  openings.set(tab.id, operation);
+  operation.catch(() => {});
+  try {
+    await operation;
+    await chrome.action.setBadgeText({tabId:tab.id,text:''});
+    await chrome.action.setTitle({tabId:tab.id,title:chrome.i18n.getMessage('actionTitle')});
+  } catch {
+    await chrome.action.setBadgeText({tabId:tab.id,text:'!'});
+    await chrome.action.setTitle({tabId:tab.id,title:chrome.i18n.getMessage('activationFailureTitle')});
+  } finally { if (openings.get(tab.id) === operation) openings.delete(tab.id); }
+}
 chrome.action.onClicked.addListener(toggleTab);
-
+chrome.runtime.onConnect.addListener(async (port) => {
+  if (port.name !== 'LINGO_PANEL_LIFETIME') return;
+  let binding, disconnected = false;
+  const documentId = port.sender?.documentId;
+  port.onDisconnect.addListener(async () => {
+    disconnected = true;
+    if (!binding || bindings.get(binding.tabId) !== binding || binding.port !== port ||
+        binding.panelDocumentId !== documentId) return;
+    delete binding.port;
+    binding.panelInactive = true;
+    const cleanup = bridgeMessage(binding,{action:'close'});
+    try { await persistBindings(); }
+    catch {}
+    await cleanup;
+  });
+  try {
+    await storageReady;
+    binding = await registeredPanel(port.sender);
+    if (!binding || disconnected) {port.disconnect(); return;}
+    const previousPort = binding.port;
+    binding.port = port;
+    previousPort?.disconnect();
+    await reattachBridge(binding);
+    if (disconnected || bindings.get(binding.tabId) !== binding || binding.port !== port ||
+        binding.panelDocumentId !== documentId) return;
+    binding.panelInactive = false;
+    await persistBindings();
+    port.postMessage({ready:true});
+  } catch {port.disconnect();}
+});
+chrome.windows.onRemoved.addListener(async (windowId) => {
+  try {
+    await storageReady;
+    const binding = [...bindings.values()].find(value => value.windowId === windowId);
+    if (binding) await disposeBinding(binding);
+  } catch {}
+});
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  try {
+    await storageReady;
+    const binding = [...bindings.values()].find(value => value.panelTabId === tabId);
+    if (binding) await disposeBinding(binding);
+  } catch {}
+});
 const LESSON_ACTIONS = new Set(['get', 'save']);
-const LIBRARY_ACTIONS = new Set([
-  'list',
-  'vocabulary',
-  'delete',
-  'clear',
-  'export',
-  'previewImport',
-  'import',
-]);
-const validVideoId = (value) => typeof value === 'string' && /^[\w-]{1,64}$/.test(value);
-const isWatchUrl = (value) => /^https:\/\/www\.youtube\.com\/watch(?:\?|$)/.test(value ?? '');
-const isLibrarySender = (message, sender) =>
-  message?.type === 'LINGO_LIBRARY' &&
-  LIBRARY_ACTIONS.has(message.action) &&
-  sender?.id === chrome.runtime.id &&
-  sender.frameId === 0 &&
-  sender.url === chrome.runtime.getURL('library.html');
-const isLessonPageSender = (sender) =>
-  sender?.id === chrome.runtime.id &&
-  Number.isInteger(sender.tab?.id) &&
-  sender.tab.id >= 0 &&
-  sender.frameId === 0 &&
-  /^https:\/\/www\.youtube\.com\//.test(sender.url ?? '');
-// SPA navigation updates tab.url; sender.url retains the isolated world's initial page.
-const isVideoSender = (message, sender, url = sender?.tab?.url ?? sender?.url) =>
-  isLessonPageSender(sender) &&
-  validVideoId(message.videoId) &&
-  isWatchUrl(url) &&
-  new URL(url).searchParams.get('v') === message.videoId;
-const isLessonSender = (message, sender) =>
-  message?.type === 'LINGO_STORE' &&
-  LESSON_ACTIONS.has(message.action) &&
-  // Final saves may arrive after YouTube has already navigated away from the old video.
-  (isVideoSender(message, sender) ||
-    (message.action === 'save' && isVideoSender(message, sender, sender.url)));
-const isOpenLibrarySender = (message, sender) =>
-  message?.type === 'LINGO_OPEN_LIBRARY' &&
-  isLessonPageSender(sender) &&
-  isWatchUrl(sender.tab?.url ?? sender.url);
+const LIBRARY_ACTIONS = new Set(['list','vocabulary','delete','clear','export','previewImport','import']);
+const isLibrarySender = (message, sender) => message?.type === 'LINGO_LIBRARY' &&
+  LIBRARY_ACTIONS.has(message.action) && sender?.id === chrome.runtime.id &&
+  sender.frameId === 0 && sender.url === chrome.runtime.getURL('library.html');
 const emptyCaptionDiagnostic = (message) => ({
   schema: 1,
   requestedSource:
@@ -408,47 +587,51 @@ async function handleLibraryMessage(message) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (isOpenLibrarySender(message, sender)) {
-    Promise.resolve()
-      .then(() => chrome.runtime.openOptionsPage())
-      .then(() => sendResponse({ opened: true }))
-      .catch(() =>
-        sendResponse({
-          error: 'Не удалось открыть «Мои занятия». Повторите попытку.',
-          code: 'OPEN_LIBRARY_FAILED',
-        }),
-      );
-    return true;
-  }
-  if (isLibrarySender(message, sender))
-    return enqueue(() => handleLibraryMessage(message), sendResponse);
-  if (isLessonSender(message, sender))
-    return enqueue(() => handleLessonMessage(message), sendResponse);
-  if (
-    message?.type !== 'LINGO_YOUTUBE' ||
-    !isVideoSender(message, sender) ||
-    !['tracks', 'load', 'transcript'].includes(message.action) ||
-    (message.trackIndex != null &&
-      (!Number.isInteger(message.trackIndex) || message.trackIndex < 0 || message.trackIndex > 1000))
-  )
-    return;
-  chrome.scripting
-    .executeScript({
-      target: { tabId: sender.tab.id },
-      world: 'MAIN',
-      func: lingoYouTube,
-      args: [message.action, { videoId: message.videoId, trackIndex: message.trackIndex }],
-    })
-    .then((results) =>
-      sendResponse(
-        results[0]?.result ??
-          captionFailure(message, 'MAIN_WORLD_NO_RESULT', 'Проигрыватель не ответил. Повторите загрузку.'),
-      ),
-    )
-    .catch(() =>
-      sendResponse(
-        captionFailure(message, 'PAGE_CONTEXT_CHANGED', 'Страница изменилась. Закройте режим и включите его снова.'),
-      ),
-    );
+  if (isLibrarySender(message, sender)) return enqueue(() => handleLibraryMessage(message), sendResponse);
+  if (!['LINGO_PANEL','LINGO_STORE','LINGO_YOUTUBE','LINGO_OPEN_LIBRARY'].includes(message?.type)) return;
+  Promise.resolve().then(async () => {
+    await storageReady;
+    const isInit = message.type === 'LINGO_PANEL' && message.action === 'init';
+    const binding = await registeredPanel(sender, isInit);
+    if (!binding) {
+      if (isInit && sender?.id === chrome.runtime.id && sender.frameId === 0 &&
+          typeof sender.documentId === 'string' && [...pendingTokens].some(token => sender.url === panelUrl(token)))
+        return {code:'PANEL_STARTING',error:'Practice window is starting.'};
+      if (isInit && sender?.id === chrome.runtime.id && sender.frameId === 0 &&
+          sender.url?.startsWith(chrome.runtime.getURL('practice.html')+'#'))
+        return {code:'PANEL_UNAVAILABLE',error:'Practice window is unavailable.'};
+      return;
+    }
+    if (message.type === 'LINGO_PANEL') {
+      if (isInit) return {videoId:binding.videoId,media:await reattachBridge(binding)};
+      if (message.action === 'close') { await disposeBinding(binding,true); return {closed:true}; }
+      if (message.action !== 'media') return invalidMessage();
+      const command = mediaCommand(message.command);
+      if (!command) return invalidMessage();
+      return {media:await bridgeMessage(binding,command)};
+    }
+    if (message.type === 'LINGO_OPEN_LIBRARY') {
+      try { await chrome.runtime.openOptionsPage(); return {opened:true}; }
+      catch { return {error:'Не удалось открыть «Мои занятия». Повторите попытку.',code:'OPEN_LIBRARY_FAILED'}; }
+    }
+    if (!validVideoId(message.videoId) || message.videoId !== binding.videoId) return;
+    if (message.type === 'LINGO_STORE') {
+      if (!LESSON_ACTIONS.has(message.action)) return;
+      return new Promise(resolve => enqueue(() => handleLessonMessage(message),resolve));
+    }
+    if (!['tracks','load','transcript'].includes(message.action) || (message.trackIndex != null &&
+        (!Number.isInteger(message.trackIndex) || message.trackIndex < 0 || message.trackIndex > 1000))) return;
+    if (!await sourceMatches(binding))
+      return captionFailure(message,'PAGE_CONTEXT_CHANGED','Страница изменилась. Закройте режим и включите его снова.');
+    try {
+      const results = await withinDeadline(chrome.scripting.executeScript({
+        target:{tabId:binding.tabId,documentIds:[binding.documentId]},world:'MAIN',func:lingoYouTube,
+        args:[message.action,{videoId:binding.videoId,trackIndex:message.trackIndex}],
+      }),15000);
+      return results[0]?.result ?? captionFailure(message,'MAIN_WORLD_NO_RESULT','Проигрыватель не ответил. Повторите загрузку.');
+    } catch {
+      return captionFailure(message,'PAGE_CONTEXT_CHANGED','Страница изменилась. Закройте режим и включите его снова.');
+    }
+  }).then(sendResponse).catch(() => sendResponse({error:'Не удалось проверить окно расширения.',code:'PANEL_UNAVAILABLE'}));
   return true;
 });

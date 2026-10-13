@@ -3,6 +3,15 @@
 
   // Russian UI copy is the key and fallback; subtitles and user filenames stay untouched.
   const english = {
+    'Защищённое окно': 'Protected window',
+    'Ответы вводятся в окне расширения. Оставьте вкладку YouTube открытой.':
+      'Enter your answers in the extension window. Keep the YouTube tab open.',
+    'Видео закрыто или изменилось. Откройте тренировку снова через значок расширения.':
+      'The video was closed or changed. Open practice again from the extension icon.',
+    'Не удалось связаться с видео.': 'Could not connect to the video.',
+    'Некорректное состояние видео.': 'Invalid video state.',
+    'Фрагмент находится до начала видео. Измените сдвиг субтитров в настройках.':
+      'This fragment is before the start of the video. Adjust the subtitle offset in settings.',
     'Тренировка аудирования': 'Listening practice',
     Настройки: 'Settings',
     Выйти: 'Exit',

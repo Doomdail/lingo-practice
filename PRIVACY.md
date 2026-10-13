@@ -1,6 +1,8 @@
 # Lingo Practice — Privacy Policy / Политика конфиденциальности
 
-Дата вступления в силу / Effective date: 30 September 2026.
+Редакция для локального кандидата 0.4.6 / Revision for the local 0.4.6 candidate: 13 October 2026.
+
+Эта редакция описывает отдельное окно кандидата 0.4.6. Опубликованная 0.4.5 использует панель на странице YouTube, где скрипты страницы могут наблюдать события клавиатуры. / This revision describes the separate window in candidate 0.4.6. Published 0.4.5 uses an on-page panel where page scripts can observe keyboard events.
 
 - Разработчик / Developer: **doomdail**
 - Контакт по вопросам данных / Privacy contact: [GitHub Issues](https://github.com/Doomdail/lingo-practice/issues)
@@ -29,11 +31,11 @@ Lingo Practice помогает тренировать аудирование н
 
 Для получения субтитров расширение может выполнить HTTPS-запрос к YouTube в контексте открытой страницы. Браузер прилагает обычные данные запроса и применимые cookies YouTube. Расширение также может открыть штатную панель расшифровки YouTube, которая выполняет собственные запросы. Код расширения не извлекает и не сохраняет пароли или значения cookies и не передаёт их разработчику.
 
-Видео воспроизводит штатный проигрыватель YouTube. Упражнения отображаются на странице YouTube; расширение не управляет обработкой данных самим сайтом. Обычная работа YouTube, включая воспроизведение, рекламу и сетевые запросы, регулируется [политикой конфиденциальности Google](https://policies.google.com/privacy). Код расширения не отправляет ваши ответы или импортированные субтитры отдельным сетевым запросом в YouTube либо разработчику.
+Видео воспроизводит штатный проигрыватель YouTube, а упражнения, ввод ответов и импорт файлов находятся в отдельном окне расширения. Вкладка YouTube получает только команды управления видео, размер видео и числовые границы фрагментов; расширение не передаёт туда ответы, импортированный текст, имена файлов, статистику слов или сохранённые объекты настроек. Расширение не управляет обработкой данных самим сайтом. Обычная работа YouTube, включая воспроизведение, рекламу и сетевые запросы, регулируется [политикой конфиденциальности Google](https://policies.google.com/privacy). Код расширения не отправляет ваши ответы или импортированные субтитры сетевым запросом в YouTube либо разработчику.
 
 ### Хранение и удаление
 
-Панель занятия использует закрытый Shadow DOM и отклоняет программно созданные действия страницы. Это ограничивает прямое чтение сохранённых ответов и подделку действий, но не создаёт отдельную защищённую страницу: скрипты YouTube могут наблюдать события клавиатуры. Не вводите в упражнения пароли и другие секреты.
+Окно занятия — самостоятельная страница источника расширения, не встроенная в YouTube. Скрипты страницы YouTube не могут читать его поля ответов и события клавиатуры. Доступ к сохранённым занятиям разрешён только зарегистрированному окну тренировки и библиотеке расширения; вкладка YouTube такого доступа не получает. Эта изоляция не защищает от скомпрометированной ОС или другого привилегированного расширения. YouTube по-прежнему управляет видео и поставляет недоверенный текст субтитров.
 
 Настройки и занятия остаются в текущем профиле браузера после закрытия вкладки или браузера. Расширение не синхронизирует их между устройствами и не удаляет старые занятия по расписанию. Данные хранятся до их перезаписи, удаления хранилища или удаления расширения. Собственное шифрование расширением не применяется.
 
@@ -73,11 +75,11 @@ This data supports lesson resumption, hints, results and review of difficult par
 
 To retrieve captions, the extension may make an HTTPS request to YouTube in the open page's context. The browser includes ordinary request information and applicable YouTube cookies. The extension may also open YouTube's native transcript panel, which makes its own requests. Extension code does not extract or store passwords or cookie values, or transmit them to the developer.
 
-YouTube's existing player plays the video. Exercises appear on the YouTube page; the extension does not control the website's own data processing. YouTube's normal operation, including playback, advertising and network requests, is covered by [Google's Privacy Policy](https://policies.google.com/privacy). Extension code does not upload your answers or imported subtitles to YouTube or the developer through a separate network request.
+YouTube's existing player plays the video, while exercises, answer entry and file imports run in a separate extension window. The YouTube tab receives only media commands, video size and numeric fragment boundaries; the extension does not send answers, imported text, file names, word statistics or stored settings objects there. The extension does not control the website's own data processing. YouTube's normal operation, including playback, advertising and network requests, is covered by [Google's Privacy Policy](https://policies.google.com/privacy). Extension code does not upload your answers or imported subtitles to YouTube or the developer through a network request.
 
 ### Retention and deletion
 
-The lesson panel uses a closed shadow root and rejects synthetic page actions. This limits direct access to saved answers and forged actions, but does not create a separate protected page: YouTube scripts may observe keyboard events. Do not enter passwords or other secrets into exercises.
+The lesson window is an independent page belonging to the extension's origin, not embedded in YouTube. YouTube page scripts cannot read its answer fields or keyboard events. Saved lesson access is restricted to the registered practice window and extension library; the YouTube tab is not granted that access. This isolation does not protect against a compromised operating system or another privileged extension. YouTube still controls the video and supplies untrusted caption text.
 
 Preferences and lessons remain in the current browser profile after a tab or the browser closes. The extension does not sync them across devices or automatically expire old lessons. They remain until overwritten, their storage is cleared, or the extension is removed. The extension does not apply its own encryption.
 

@@ -6,9 +6,12 @@ English · [Русский](README.ru.md) · [Download 0.4.5](https://github.com
 
 Practice listening with YouTube videos. Fill in missing words, replay a line, and revisit difficult parts while keeping your progress on your device.
 
+This working branch contains the **local 0.4.6 candidate**. The published GitHub download remains **0.4.5**, whose exercises run on the YouTube page. The candidate opens exercises in a separate extension window; it has not been published.
+
 ## Features
 
 - Exercises from YouTube captions, its transcript panel, or a local SRT/VTT file.
+- A separate extension window for exercises, answers, settings and subtitle imports.
 - Three hints: first letter, replay at 0.75× speed, then reveal the word.
 - Separate counts for answers without hints, assisted answers, revealed words, and skips.
 - Line replay, optional auto-pause, and mistake review that preserves your main result.
@@ -21,13 +24,24 @@ No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download [lingo-practice-0.4.5.zip](https://github.com/Doomdail/lingo-practice/releases/download/v0.4.5/lingo-practice-0.4.5.zip). You can also download or clone this repository and load its source folder directly.
+1. Download the published [lingo-practice-0.4.5.zip](https://github.com/Doomdail/lingo-practice/releases/download/v0.4.5/lingo-practice-0.4.5.zip), or use the local candidate's source folder to try 0.4.6.
 2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
-5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Pin it from the browser's extensions menu for easier access.
+5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. In the 0.4.6 candidate, this opens a separate practice window. Keep the video tab open and arrange the two windows side by side. Pin the icon from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.5** for this release. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts and pages, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.6** for this candidate or **0.4.5** for the published ZIP. Removing the extension deletes its local progress; an ordinary update does not require removal.
+
+## Version 0.4.6 — local candidate
+
+- All exercise text, answer fields, settings and file imports run in an independent extension window. YouTube page scripts cannot read keyboard events inside that window.
+- The YouTube tab receives media commands, video size and numeric fragment boundaries. It does not receive lesson answers, imported text, file names, word statistics or stored settings objects.
+- Caption retrieval still uses YouTube's page context. The site continues to control its player and captions.
+- Existing lessons and backups keep the same data format. The `activeTab`, `scripting` and `storage` permissions, Chromium 106 minimum, 8 MB subtitle limit and 10 MB backup limit are unchanged.
+
+Local Chromium 147 checks passed for typing/paste isolation, imports, restored lessons, review, backup, paused seeking, window navigation/reload, worker restart and a suspended practice window. A separate smoke check used YouTube's real player for playback, seeking, slow replay and close cleanup. Automated activation used a temporary test-only host grant; the native toolbar button, Chromium 106 and other browsers still need manual verification.
+
+This candidate is available locally for verification. No GitHub release or download for 0.4.6 has been published.
 
 ## Version 0.4.5
 
@@ -60,7 +74,7 @@ Type the missing word and press **Enter** or **NumPad Enter**. Matching ignores 
 
 Use **↶ Replay line** or a timestamp to play a line again. **Go to current line** brings the list back to the video's position. Automatic scrolling pauses while an answer field has focus. Optional **Pause at the end of a line** stops playback when that line still needs an answer.
 
-During practice, NumPad keys do not accidentally seek the video after a click on the player. Numeric input and NumLock-off editing continue to work in the extension's fields. **Exit** or another click on the extension icon restores the page and YouTube's shortcuts. Moving to another video closes practice; click the icon again to start there.
+Enter answers and use the practice controls in the separate extension window. Video playback stays in the YouTube tab. **Exit** or closing the practice window restores the page and YouTube's shortcuts. Clicking the extension icon again focuses the existing practice window. After moving to another video, reopen practice with the icon to work on that video. Saved lessons remain in the library.
 
 YouTube's own captions are hidden over the video during practice so they cannot reveal missing words. Their CC setting is left unchanged and the captions reappear after you exit if they were enabled.
 
@@ -109,15 +123,17 @@ The footer shows save status and storage errors. If another tab has newer progre
 
 The 8 MB subtitle file limit is separate from the browser's storage quota: saved tasks also include answers and text fragments. If a replacement cannot be saved, the current lesson stays open. Free space by exporting a backup and deleting unneeded lessons in **My lessons**. JSON backup files are limited to 10 MB.
 
-Open **My lessons** from the practice header in 0.4.5, **Settings** in 0.4.4, or the extension's options page. **Open video** opens YouTube at the saved position; click the Lingo Practice icon there to restore the exercise. You can delete individual lessons, search and sort difficult words, and download a CSV word list. **Export backup** downloads a local JSON file containing captions and answers. **Import backup** previews changes before applying them; importing settings is optional. **Delete all data** removes lessons, word statistics, and settings from this browser profile. Keep backup files private and delete them separately when no longer needed.
+Open **My lessons** from the practice header or the extension's options page. **Open video** opens YouTube at the saved position; click the Lingo Practice icon there to restore the exercise in its practice window. You can delete individual lessons, search and sort difficult words, and download a CSV word list. **Export backup** downloads a local JSON file containing captions and answers. **Import backup** previews changes before applying them; importing settings is optional. **Delete all data** removes lessons, word statistics, and settings from this browser profile. Keep backup files private and delete them separately when no longer needed.
 
 `activeTab` and `scripting` allow access to the current tab after you click the icon; `storage` saves progress locally. There is no analytics or developer-operated service. Caption requests go to YouTube in the current page's context, and YouTube's normal playback and network activity continue.
+
+The separate practice window belongs to the extension's origin. YouTube scripts cannot read its keyboard events or answer fields, and saved lesson access is restricted to the registered practice window and library. This boundary does not protect against a compromised operating system or another privileged extension. YouTube still controls the video and supplies untrusted captions. Local data and exported backups are not encrypted by Lingo Practice.
 
 Removing the extension or using **Delete all data** clears its saved local data. Exiting practice or disabling the extension does not. See the [Privacy Policy](PRIVACY.md) for details.
 
 ## Compatibility
 
-Live YouTube caption loading and lesson reopening have been checked in **Chromium, Edge, and Opera GX on Windows**. The Chromium scenario also checks conflicting tabs and backup restoration after deleting data. Layouts cover desktop and compact windows, including 1440×1050 and 780×800.
+The published 0.4.5 line's YouTube caption loading and lesson reopening were checked in **Chromium, Edge, and Opera GX on Windows**. Its Chromium scenario also checked conflicting tabs and backup restoration after deleting data. Layouts covered desktop and compact windows, including 1440×1050 and 780×800. These results do not establish compatibility of the new 0.4.6 practice window; candidate results are recorded separately during local verification.
 
 Local automation grants YouTube access only in its temporary extension copies to simulate activation. It tests caption hiding with a synthetic caption element. The toolbar button and real YouTube captions in branded Chrome still need a manual check.
 
