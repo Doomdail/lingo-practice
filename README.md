@@ -2,11 +2,11 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-English · [Русский](README.ru.md) · [Source ZIP 0.4.6](https://github.com/Doomdail/lingo-practice/archive/refs/heads/main.zip) · [Release 0.4.5](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.5) · [Issues](https://github.com/Doomdail/lingo-practice/issues)
+English · [Русский](README.ru.md) · [Download 0.4.6](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.6) · [Issues](https://github.com/Doomdail/lingo-practice/issues)
 
 Practice listening with YouTube videos. Fill in missing words, replay a line, and revisit difficult parts while keeping your progress on your device.
 
-The `main` branch contains **version 0.4.6**, which opens exercises in a separate extension window. The latest packaged GitHub release remains **0.4.5**, whose exercises run on the YouTube page.
+The `main` branch and release ZIP contain **version 0.4.6**, which opens exercises in a separate extension window.
 
 ## Features
 
@@ -24,13 +24,13 @@ No account, API key, server, build step, or runtime dependency is required.
 
 ## Install
 
-1. Download the [0.4.6 source ZIP from `main`](https://github.com/Doomdail/lingo-practice/archive/refs/heads/main.zip).
+1. Download [lingo-practice-0.4.6.zip](https://github.com/Doomdail/lingo-practice/releases/download/v0.4.6/lingo-practice-0.4.6.zip).
 2. Extract it into a permanent folder and find the folder containing `manifest.json`.
 3. Open `chrome://extensions`, `opera://extensions`, or `edge://extensions` and enable **Developer mode**.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 5. Open a regular video at `https://www.youtube.com/watch?...`, wait for the player to load, and click the Lingo Practice extension icon. Version 0.4.6 opens a separate practice window. Keep the video tab open and arrange the two windows side by side. Pin the icon from the browser's extensions menu for easier access.
 
-To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts and pages, `_locales`, and `icons`. Check that the displayed version matches your package: **0.4.6** for the source ZIP or **0.4.5** for the older release ZIP. Removing the extension deletes its local progress; an ordinary update does not require removal.
+To update, replace the files in the same installed folder, reload the extension on the extensions page, and reload the YouTube tab. Include `manifest.json`, all extension scripts and pages, `_locales`, and `icons`. Check that the displayed version is **0.4.6**. Removing the extension deletes its local progress; an ordinary update does not require removal.
 
 ## Version 0.4.6
 
@@ -41,7 +41,7 @@ To update, replace the files in the same installed folder, reload the extension 
 
 Local Chromium 147 checks passed for typing/paste isolation, imports, restored lessons, review, backup, paused seeking, window navigation/reload, worker restart and a suspended practice window. A separate smoke check used YouTube's real player for playback, seeking, slow replay and close cleanup. Automated activation used a temporary test-only host grant; the native toolbar button, Chromium 106 and other browsers still need manual verification.
 
-The 0.4.6 source is available in `main`. A separate packaged GitHub release for 0.4.6 has not been published.
+Download the installable ZIP from [Release 0.4.6](https://github.com/Doomdail/lingo-practice/releases/tag/v0.4.6).
 
 ## Version 0.4.5
 
